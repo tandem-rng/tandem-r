@@ -3,19 +3,16 @@
 # tandem-r
 
 R package `tandemrng` for [Tandem8x32](https://github.com/tandem-rng/spec), a noncryptographic
-pseudorandom number generator built to be fast on CPUs and GPUs alike. It wraps the C
-reference [tandem-c](https://github.com/tandem-rng/tandem-c) and produces the same stream,
-bit for bit, as [TandemRNG.jl](https://github.com/tandem-rng/TandemRNG.jl),
-[tandem-rs](https://github.com/tandem-rng/tandem-rs),
-[tandem-numpy](https://github.com/tandem-rng/tandem-numpy) and
-[tandem-cuda](https://github.com/tandem-rng/tandem-cuda).
+pseudorandom number generator built to be fast on CPUs and GPUs alike. It wraps a vendored
+copy of the reference C implementation and produces the stream the specification defines,
+bit for bit.
 
 ## Use
 
 ```r
 library(tandemrng)
 
-rng <- tandem(42)                    # seed whitening: the stream of Julia Tandem8x32(42)
+rng <- tandem(42)                    # seed whitening: the spec's stream for seed 42
 u <- tandem_runif(rng, 1e6)          # the specification's Float64 draws
 f <- tandem_rsingle(rng, 10)         # Float32 draws, as doubles
 w <- tandem_rbits(rng, 10, 32)       # unsigned 32-bit words, as doubles
@@ -51,9 +48,8 @@ runs the tests and `pixi run check` runs `R CMD check --as-cran`.
 
 `tests/testthat/test-tandem.R` checks every vector of the specification
 (`tests/testthat/vectors.json`, a copy of the spec repository's file), compares fills with
-dumps written by TandemRNG.jl (`tests/testthat/data`, shared with tandem-c), and checks the
-base R hook. CI fails when the vendored C sources in `src/` or the vectors drift from their
-upstream repositories. `tools/sync_c.sh` refreshes the C sources.
+reference stream dumps in `tests/testthat/data`, and checks the base R hook. CI fails when
+the vendored C sources in `src/` or the vectors drift from upstream. `tools/sync_c.sh` refreshes the C sources.
 
 ## Speed
 
