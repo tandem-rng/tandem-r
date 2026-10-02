@@ -1,0 +1,19 @@
+[workspace]
+name = "tandem-r"
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "linux-64"]
+
+[dependencies]
+r-base = ">=4.5"
+r-testthat = "*"
+r-jsonlite = "*"
+r-roxygen2 = "*"
+r-rcmdcheck = "*"
+c-compiler = "*"
+make = "*"
+
+[tasks]
+document = "Rscript -e 'roxygen2::roxygenise()'"
+test = "Rscript -e 'testthat::test_local()'"
+check = "Rscript -e 'rcmdcheck::rcmdcheck(args = \"--as-cran\", error_on = \"warning\")'"
+bench = "Rscript tools/bench.R"

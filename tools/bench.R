@@ -1,0 +1,19 @@
+# Throughput of 2^24 uniform doubles: tandem_runif against base runif with Mersenne-Twister.
+library(tandemrng)
+
+n <- 2^24
+bytes <- 8 * n
+best <- function(f, runs = 7) {
+  f()
+  min(vapply(seq_len(runs), function(i) system.time(f())[["elapsed"]], numeric(1)))
+}
+
+rng <- tandem(42)
+RNGkind("Mersenne-Twister")
+set.seed(42)
+rows <- c(
+  "tandem_runif(rng, n)" = bytes / best(function() tandem_runif(rng, n)) / 2^30,
+  "runif(n), Mersenne-Twister" = bytes / best(function() runif(n)) / 2^30
+)
+for (name in names(rows)) cat(sprintf("%-30s %6.2f GiB/s\n", name, rows[[name]]))
+cat("load", system("uptime | sed 's/.*load averages*: //'", intern = TRUE), "\n")

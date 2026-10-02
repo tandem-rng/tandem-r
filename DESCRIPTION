@@ -1,0 +1,20 @@
+Package: tandemrng
+Title: Tandem8x32 Pseudorandom Number Generator
+Version: 0.1.0
+Authors@R: person("Jessica", "Cox", email = "jmcox@posteo.de", role = c("aut", "cre"))
+Description: A noncryptographic pseudorandom number generator, Tandem8x32, built to be
+    fast on CPUs and GPUs alike. The package wraps the reference C implementation and
+    produces the same stream, bit for bit, as the other implementations of the
+    specification <https://github.com/tandem-rng/spec>. It provides generators with
+    cheap splitting by index, by purpose and by fork, fills of uniform doubles and of
+    unsigned words, and a hook that makes Tandem the base R generator through
+    RNGkind("user-supplied").
+License: Apache License (== 2.0) | file LICENSE
+URL: https://github.com/tandem-rng/tandem-r, https://github.com/tandem-rng/spec
+BugReports: https://github.com/tandem-rng/tandem-r/issues
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+SystemRequirements: C99
+Suggests: testthat (>= 3.0.0), jsonlite
+Config/testthat/edition: 3
+Config/roxygen2/version: 8.1.0

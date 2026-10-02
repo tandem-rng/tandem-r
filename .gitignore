@@ -1,0 +1,8 @@
+.pixi/
+pixi.lock
+src/*.o
+src/*.so
+src/*.dll
+*.Rcheck/
+*.tar.gz
+.Rhistory

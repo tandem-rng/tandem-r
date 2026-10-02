@@ -1,0 +1,11 @@
+^assets$
+^pixi\.toml$
+^pixi\.lock$
+^\.pixi$
+^tools$
+^\.github$
+^README\.md$
+^NOTICE$
+^\.gitignore$
+^.*\.Rcheck$
+^.*\.tar\.gz$

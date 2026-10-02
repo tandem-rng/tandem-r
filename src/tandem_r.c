@@ -1,0 +1,316 @@
+/* R bindings for Tandem8x32 over the vendored reference implementation (tandem.c).
+ *
+ * Copyright 2026 Jessica Cox. Apache License 2.0, see LICENSE.
+ */
+#include <R.h>
+#include <Rinternals.h>
+#include <R_ext/Rdynload.h>
+#include <R_ext/Random.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "tandem.h"
+
+#define TWO53 9007199254740992.0
+
+/* ---- Argument parsing ------------------------------------------------------------------ */
+
+/* An unsigned 128-bit value from a double below 2^53 or a string of decimal digits. */
+static void parse_u128(SEXP x, const char *what, uint64_t *lo, uint64_t *hi) {
+    if ((TYPEOF(x) == REALSXP || TYPEOF(x) == INTSXP) && XLENGTH(x) == 1) {
+        double d = asReal(x);
+        if (!(d >= 0 && d < TWO53) || d != (double)(uint64_t)d)
+            error("%s must be an integer-valued number in [0, 2^53), or a decimal string", what);
+        *lo = (uint64_t)d;
+        *hi = 0;
+        return;
+    }
+    if (TYPEOF(x) == STRSXP && XLENGTH(x) == 1) {
+        const char *s = CHAR(STRING_ELT(x, 0));
+        *lo = *hi = 0;
+        if (!*s) error("%s must not be empty", what);
+        for (; *s; s++) {
+            uint64_t d = (uint64_t)(*s - '0'), carry;
+            if (*s < '0' || *s > '9') error("%s must contain decimal digits only", what);
+            /* (hi, lo) = 10 * (hi, lo) + d, checked for overflow of 128 bits */
+            if (*hi > UINT64_MAX / 10u) error("%s exceeds 2^128 - 1", what);
+            carry = ((*lo >> 32) * 10u + ((((*lo & 0xffffffffu) * 10u) + d) >> 32)) >> 32;
+            *lo = *lo * 10u + d;
+            if (*hi * 10u + carry < *hi) error("%s exceeds 2^128 - 1", what);
+            *hi = *hi * 10u + carry;
+        }
+        return;
+    }
+    error("%s must be a single number or a single string", what);
+}
+
+static uint64_t parse_u64(SEXP x, const char *what) {
+    uint64_t lo, hi;
+    parse_u128(x, what, &lo, &hi);
+    if (hi) error("%s exceeds 2^64 - 1", what);
+    return lo;
+}
+
+static uint32_t parse_K(SEXP x) {
+    double d = asReal(x);
+    uint32_t K = (uint32_t)d;
+    if (!(d >= 1 && d <= 65536) || (double)K != d || (K & (K - 1u)))
+        error("K must be a power of two in [1, 65536]");
+    return K;
+}
+
+static int hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/* Four words from four integer-valued doubles or from 32 hex digits, word 0 first. */
+static void parse_key(SEXP x, uint32_t key[4]) {
+    if ((TYPEOF(x) == REALSXP || TYPEOF(x) == INTSXP) && XLENGTH(x) == 4) {
+        for (int w = 0; w < 4; w++) {
+            double d = TYPEOF(x) == REALSXP ? REAL(x)[w] : (double)INTEGER(x)[w];
+            if (!(d >= 0 && d <= 4294967295.0) || d != (double)(uint32_t)d)
+                error("key words must be integer-valued numbers in [0, 2^32)");
+            key[w] = (uint32_t)d;
+        }
+        return;
+    }
+    if (TYPEOF(x) == STRSXP && XLENGTH(x) == 1) {
+        const char *s = CHAR(STRING_ELT(x, 0));
+        if (strlen(s) != 32) error("a hex key must have 32 digits");
+        for (int w = 0; w < 4; w++) {
+            key[w] = 0;
+            for (int i = 0; i < 8; i++) {
+                int d = hex_digit(s[8 * w + i]);
+                if (d < 0) error("a hex key must contain hex digits only");
+                key[w] = key[w] << 4 | (uint32_t)d;
+            }
+        }
+        return;
+    }
+    error("key must be four numbers or one string of 32 hex digits");
+}
+
+static size_t parse_n(SEXP x) {
+    double d = asReal(x);
+    if (!(d >= 0 && d < TWO53) || d != (double)(size_t)d) error("n must be a nonnegative integer");
+    return (size_t)d;
+}
+
+/* ---- Generator objects ------------------------------------------------------------------ */
+
+static void finalize(SEXP ptr) {
+    tandem_rng *rng = R_ExternalPtrAddr(ptr);
+    if (rng) {
+        R_Free(rng);
+        R_ClearExternalPtr(ptr);
+    }
+}
+
+static SEXP wrap(tandem_rng rng) {
+    tandem_rng *p = R_Calloc(1, tandem_rng);
+    SEXP ptr, cls;
+    *p = rng;
+    ptr = PROTECT(R_MakeExternalPtr(p, R_NilValue, R_NilValue));
+    R_RegisterCFinalizerEx(ptr, finalize, TRUE);
+    cls = PROTECT(mkString("tandem_rng"));
+    setAttrib(ptr, R_ClassSymbol, cls);
+    UNPROTECT(2);
+    return ptr;
+}
+
+static tandem_rng *unwrap(SEXP ptr) {
+    tandem_rng *rng;
+    if (TYPEOF(ptr) != EXTPTRSXP || !inherits(ptr, "tandem_rng"))
+        error("expected a tandem_rng object");
+    rng = R_ExternalPtrAddr(ptr);
+    if (!rng) error("the generator has been freed");
+    return rng;
+}
+
+static int entropy(uint64_t *lo, uint64_t *hi) {
+    FILE *f = fopen("/dev/urandom", "rb");
+    unsigned char b[16];
+    int ok = f && fread(b, 1, 16, f) == 16;
+    if (f) fclose(f);
+    if (!ok) return 0;
+    *lo = *hi = 0;
+    for (int i = 0; i < 8; i++) {
+        *lo |= (uint64_t)b[i] << (8 * i);
+        *hi |= (uint64_t)b[8 + i] << (8 * i);
+    }
+    return 1;
+}
+
+SEXP R_tandem_new(SEXP seed, SEXP K) {
+    uint64_t lo, hi;
+    if (isNull(seed)) {
+        if (!entropy(&lo, &hi)) {
+            /* No /dev/urandom: take 128 bits from R's own generator instead. */
+            GetRNGstate();
+            lo = (uint64_t)(unif_rand() * 4294967296.0) | (uint64_t)(unif_rand() * 4294967296.0) << 32;
+            hi = (uint64_t)(unif_rand() * 4294967296.0) | (uint64_t)(unif_rand() * 4294967296.0) << 32;
+            PutRNGstate();
+        }
+    } else {
+        parse_u128(seed, "seed", &lo, &hi);
+    }
+    return wrap(tandem_seed(lo, hi, parse_K(K)));
+}
+
+SEXP R_tandem_from_key(SEXP key, SEXP position, SEXP K) {
+    uint32_t k[4];
+    parse_key(key, k);
+    return wrap(tandem_from_key(k, parse_u64(position, "position"), parse_K(K)));
+}
+
+SEXP R_tandem_key(SEXP rng) {
+    uint32_t key[4];
+    char s[33];
+    tandem_key(unwrap(rng), key);
+    snprintf(s, sizeof s, "%08x%08x%08x%08x", key[0], key[1], key[2], key[3]);
+    return mkString(s);
+}
+
+SEXP R_tandem_position(SEXP rng) {
+    uint64_t p = tandem_position(unwrap(rng));
+    char s[21];
+    if (p < (uint64_t)1 << 53) return ScalarReal((double)p);
+    snprintf(s, sizeof s, "%llu", (unsigned long long)p);
+    return mkString(s);
+}
+
+SEXP R_tandem_set_position(SEXP rng, SEXP position) {
+    unwrap(rng)->pos = parse_u64(position, "position");
+    return rng;
+}
+
+SEXP R_tandem_chunk_length(SEXP rng) { return ScalarInteger((int)tandem_chunk_length(unwrap(rng))); }
+
+/* ---- Draws ------------------------------------------------------------------------------ */
+
+SEXP R_tandem_runif(SEXP rng, SEXP n) {
+    size_t len = parse_n(n);
+    SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)len));
+    tandem_fill_f64(unwrap(rng), REAL(out), len);
+    UNPROTECT(1);
+    return out;
+}
+
+SEXP R_tandem_rsingle(SEXP rng, SEXP n) {
+    size_t len = parse_n(n);
+    SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)len));
+    double *x = REAL(out);
+    /* Fill the second half of the buffer with floats, then widen in place from the front. */
+    float *f = (float *)(x + len / 2 + len % 2);
+    tandem_fill_f32(unwrap(rng), f, len);
+    for (size_t i = 0; i < len; i++) x[i] = (double)f[i];
+    UNPROTECT(1);
+    return out;
+}
+
+SEXP R_tandem_rbits(SEXP rng, SEXP n, SEXP bits) {
+    size_t len = parse_n(n);
+    int w = asInteger(bits);
+    SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)len));
+    double *x = REAL(out);
+    tandem_rng *g = unwrap(rng);
+    if (w == 32) {
+        /* 32-bit words fill the first half of the buffer; widen from the back. */
+        uint32_t *u = (uint32_t *)x;
+        tandem_fill_u32(g, u, len);
+        for (size_t i = len; i-- > 0;) x[i] = (double)u[i];
+    } else if (w == 16) {
+        uint16_t *u = (uint16_t *)x;
+        tandem_fill_u16(g, u, len);
+        for (size_t i = len; i-- > 0;) x[i] = (double)u[i];
+    } else if (w == 8) {
+        uint8_t *u = (uint8_t *)x;
+        tandem_fill_u8(g, u, len);
+        for (size_t i = len; i-- > 0;) x[i] = (double)u[i];
+    } else {
+        error("bits must be 8, 16 or 32");
+    }
+    UNPROTECT(1);
+    return out;
+}
+
+SEXP R_tandem_rbool(SEXP rng, SEXP n) {
+    size_t len = parse_n(n);
+    SEXP out = PROTECT(allocVector(LGLSXP, (R_xlen_t)len));
+    int *x = LOGICAL(out);
+    tandem_rng *g = unwrap(rng);
+    for (size_t i = 0; i < len; i++) x[i] = tandem_next_bool(g);
+    UNPROTECT(1);
+    return out;
+}
+
+/* ---- Derived generators ----------------------------------------------------------------- */
+
+SEXP R_tandem_split(SEXP rng, SEXP index) {
+    return wrap(tandem_split(unwrap(rng), parse_u64(index, "index")));
+}
+
+SEXP R_tandem_sub(SEXP rng, SEXP purpose) {
+    return wrap(tandem_sub(unwrap(rng), parse_u64(purpose, "purpose")));
+}
+
+SEXP R_tandem_fork(SEXP rng, SEXP n) {
+    size_t len = parse_n(n);
+    tandem_rng *kids = R_Calloc(len ? len : 1, tandem_rng);
+    SEXP out = PROTECT(allocVector(VECSXP, (R_xlen_t)len));
+    tandem_fork(unwrap(rng), kids, len);
+    for (size_t i = 0; i < len; i++) SET_VECTOR_ELT(out, (R_xlen_t)i, wrap(kids[i]));
+    R_Free(kids);
+    UNPROTECT(1);
+    return out;
+}
+
+/* ---- Base R hook: RNGkind("user-supplied") ---------------------------------------------- */
+
+static tandem_rng user_rng;
+static double user_value;
+
+/* set.seed(s) hands the hook 50 rounds of s <- 69069 s + 1 (mod 2^32). Undo them, so that
+ * set.seed(s) is the generator tandem(s) for every s in the Int32 range. */
+void user_unif_init(Int32 seed) {
+    const uint32_t inv = 0xa5e2a705u; /* 69069^-1 mod 2^32 */
+    for (int j = 0; j < 50; j++) seed = (seed - 1u) * inv;
+    user_rng = tandem_seed(seed, 0, TANDEM_DEFAULT_K);
+}
+
+double *user_unif_rand(void) {
+    user_value = tandem_next_f64(&user_rng);
+    return &user_value;
+}
+
+/* ---- Registration ----------------------------------------------------------------------- */
+
+static const R_CallMethodDef calls[] = {
+    {"R_tandem_new", (DL_FUNC)&R_tandem_new, 2},
+    {"R_tandem_from_key", (DL_FUNC)&R_tandem_from_key, 3},
+    {"R_tandem_key", (DL_FUNC)&R_tandem_key, 1},
+    {"R_tandem_position", (DL_FUNC)&R_tandem_position, 1},
+    {"R_tandem_set_position", (DL_FUNC)&R_tandem_set_position, 2},
+    {"R_tandem_chunk_length", (DL_FUNC)&R_tandem_chunk_length, 1},
+    {"R_tandem_runif", (DL_FUNC)&R_tandem_runif, 2},
+    {"R_tandem_rsingle", (DL_FUNC)&R_tandem_rsingle, 2},
+    {"R_tandem_rbits", (DL_FUNC)&R_tandem_rbits, 3},
+    {"R_tandem_rbool", (DL_FUNC)&R_tandem_rbool, 2},
+    {"R_tandem_split", (DL_FUNC)&R_tandem_split, 2},
+    {"R_tandem_sub", (DL_FUNC)&R_tandem_sub, 2},
+    {"R_tandem_fork", (DL_FUNC)&R_tandem_fork, 2},
+    {NULL, NULL, 0}};
+
+/* RNGkind("user-supplied") looks these two up by name among the registered symbols. */
+static const R_CMethodDef cmethods[] = {
+    {"user_unif_rand", (DL_FUNC)&user_unif_rand, 0},
+    {"user_unif_init", (DL_FUNC)&user_unif_init, 1},
+    {NULL, NULL, 0}};
+
+void R_init_tandemrng(DllInfo *dll) {
+    R_registerRoutines(dll, cmethods, calls, NULL, NULL);
+    R_useDynamicSymbols(dll, FALSE);
+}
