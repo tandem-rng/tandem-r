@@ -53,14 +53,17 @@ the vendored C sources in `src/` or the vectors drift from upstream. `tools/sync
 
 ## Speed
 
-Apple M4, one thread, `pixi run bench`, 2^24 doubles, minimum of seven runs, load 9:
+Apple M4, one thread, `pixi run bench`, 2^24 doubles, minimum of seven runs, load 2.5:
 
 | | GiB/s |
 |---|---|
-| `tandem_runif(rng, n)` | 6.25 |
-| `runif(n)`, Mersenne-Twister | 1.74 |
+| `tandem_runif(rng, n)` | 8.9 |
+| `runif(n)` with Tandem as the user-supplied generator | 1.8 |
+| `runif(n)`, Mersenne-Twister | 2.3 |
 
-The first row is the C fill plus R's allocation of the result.
+The first row is the C fill plus R's allocation of the result. The user-supplied hook returns
+one double per call, so `runif` through it runs at R's call rate rather than the fill rate.
+Buffering fills inside the hook was measured and bought nothing.
 
 ## License
 
