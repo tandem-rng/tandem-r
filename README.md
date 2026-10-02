@@ -53,7 +53,7 @@ the vendored C sources in `src/` or the vectors drift from upstream. `tools/sync
 
 ## Speed
 
-Apple M4, one thread, `pixi run bench`, 2^24 doubles, minimum of seven runs, load 2.5:
+Apple M4, one thread, `pixi run bench`, 2^24 doubles, minimum of seven runs:
 
 | | GiB/s |
 |---|---|
