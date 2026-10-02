@@ -21,4 +21,3 @@ rows <- c(
   "runif(n), Mersenne-Twister" = bytes / best(function() runif(n)) / 2^30
 )
 for (name in names(rows)) cat(sprintf("%-30s %6.2f GiB/s\n", name, rows[[name]]))
-cat("load", system("uptime | sed 's/.*load averages*: //'", intern = TRUE), "\n")
