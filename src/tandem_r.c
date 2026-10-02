@@ -271,19 +271,28 @@ SEXP R_tandem_fork(SEXP rng, SEXP n) {
 /* ---- Base R hook: RNGkind("user-supplied") ---------------------------------------------- */
 
 static tandem_rng user_rng;
-static double user_value;
 
 /* set.seed(s) hands the hook 50 rounds of s <- 69069 s + 1 (mod 2^32). Undo them, so that
  * set.seed(s) is the generator tandem(s) for every s in the Int32 range. */
+/* R asks the hook for one double at a time. Filling a buffer of rows amortises the
+ * generator's per-call cost; the values and their order are those of tandem_next_f64. */
+#define USER_BUF 1024
+static double user_buf[USER_BUF];
+static size_t user_left;
+
 void user_unif_init(Int32 seed) {
     const uint32_t inv = 0xa5e2a705u; /* 69069^-1 mod 2^32 */
     for (int j = 0; j < 50; j++) seed = (seed - 1u) * inv;
     user_rng = tandem_seed(seed, 0, TANDEM_DEFAULT_K);
+    user_left = 0;
 }
 
 double *user_unif_rand(void) {
-    user_value = tandem_next_f64(&user_rng);
-    return &user_value;
+    if (user_left == 0) {
+        tandem_fill_f64(&user_rng, user_buf, USER_BUF);
+        user_left = USER_BUF;
+    }
+    return &user_buf[USER_BUF - user_left--];
 }
 
 /* ---- Registration ----------------------------------------------------------------------- */

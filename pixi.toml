@@ -16,4 +16,5 @@ make = "*"
 document = "Rscript -e 'roxygen2::roxygenise()'"
 test = "Rscript -e 'testthat::test_local()'"
 check = "Rscript -e 'rcmdcheck::rcmdcheck(args = \"--as-cran\", error_on = \"warning\")'"
-bench = "Rscript tools/bench.R"
+install = "R CMD INSTALL --preclean ."
+bench = { cmd = "Rscript tools/bench.R", depends-on = ["install"] }

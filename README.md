@@ -57,13 +57,15 @@ Apple M4, one thread, `pixi run bench`, 2^24 doubles, minimum of seven runs, loa
 
 | | GiB/s |
 |---|---|
-| `tandem_runif(rng, n)` | 8.9 |
-| `runif(n)` with Tandem as the user-supplied generator | 1.8 |
-| `runif(n)`, Mersenne-Twister | 2.3 |
+| `tandem_runif(rng, n)` | 9.6 |
+| `runif(n)` with Tandem as the user-supplied generator | 2.05 |
+| `runif(n)`, Mersenne-Twister | 2.2 |
 
 The first row is the C fill plus R's allocation of the result. The user-supplied hook returns
-one double per call, so `runif` through it runs at R's call rate rather than the fill rate.
-Buffering fills inside the hook was measured and bought nothing.
+one double per call, so `runif` through it runs at R's call rate. The hook fills a buffer of
+1024 doubles at a time, which leaves only the indirect call into the package between it and
+the built-in generator. `pixi run bench` installs the package first, so it measures the
+current sources.
 
 ## License
 
