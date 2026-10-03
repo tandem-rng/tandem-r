@@ -21,7 +21,10 @@ static const uint32_t RC[8] = {0xd17cc1b7u, 0xa7220a94u, 0xfe13abe8u, 0xfa9a6ee0
 
 static inline uint32_t rotl(uint32_t x, unsigned r) { return (x << r) | (x >> (32u - r)); }
 
-void tandem_T(uint32_t o[4], uint32_t h[4]) {
+/* The step and the seeding function as static inline bodies. The public tandem_T and tandem_F
+   wrap them: GCC does not inline a public function into the scalar row loop, which left that
+   loop at a fifth of its speed. */
+static inline void step_T(uint32_t o[4], uint32_t h[4]) {
     uint64_t p0 = (uint64_t)o[0] * (h[0] | 1u);
     uint64_t p1 = (uint64_t)o[2] * (h[1] | 1u);
     uint32_t lo0 = (uint32_t)p0, hi0 = (uint32_t)(p0 >> 32);
@@ -43,16 +46,19 @@ void tandem_T(uint32_t o[4], uint32_t h[4]) {
     o[3] = n3;
 }
 
-void tandem_F(uint32_t o[4], uint32_t h[4]) {
+static inline void step_F(uint32_t o[4], uint32_t h[4]) {
     for (int r = 0; r < 8; r++) {
         uint32_t t[4];
-        tandem_T(o, h);
+        step_T(o, h);
         o[0] ^= RC[r];
         memcpy(t, o, sizeof t);
         memcpy(o, h, sizeof t);
         memcpy(h, t, sizeof t);
     }
 }
+
+void tandem_T(uint32_t o[4], uint32_t h[4]) { step_T(o, h); }
+void tandem_F(uint32_t o[4], uint32_t h[4]) { step_F(o, h); }
 
 void tandem_F_keyed(const uint32_t key[4], uint64_t counter, uint32_t domain, uint32_t aux,
                     uint32_t o[4], uint32_t h[4]) {
@@ -61,13 +67,13 @@ void tandem_F_keyed(const uint32_t key[4], uint64_t counter, uint32_t domain, ui
     o[2] = domain;
     o[3] = aux;
     memcpy(h, key, 16);
-    tandem_F(o, h);
+    step_F(o, h);
 }
 
 void tandem_block(const uint32_t key[4], uint64_t c, uint32_t j, uint32_t out[4]) {
     uint32_t h[4];
     tandem_F_keyed(key, c, DOMAIN_STREAM, AUX_STREAM, out, h);
-    for (uint32_t s = 0; s <= j; s++) tandem_T(out, h);
+    for (uint32_t s = 0; s <= j; s++) step_T(out, h);
 }
 
 /* ---- Eight lanes ---------------------------------------------------------------------
@@ -256,14 +262,25 @@ static inline void lanes_save(const lanes *L, tandem_rng *rng) {
 }
 
 static inline void lanes_T(lanes *L) {
+    /* One straight-line body per lane, so that the loop vectorizes over the eight lanes. */
     for (unsigned l = 0; l < 8; l++) {
-        uint32_t o[4] = {L->o[0][l], L->o[1][l], L->o[2][l], L->o[3][l]};
-        uint32_t h[4] = {L->h[0][l], L->h[1][l], L->h[2][l], L->h[3][l]};
-        tandem_T(o, h);
-        for (unsigned w = 0; w < 4; w++) {
-            L->o[w][l] = o[w];
-            L->h[w][l] = h[w];
-        }
+        uint32_t o0 = L->o[0][l], o1 = L->o[1][l], o2 = L->o[2][l], o3 = L->o[3][l];
+        uint32_t h0 = L->h[0][l], h1 = L->h[1][l], h2 = L->h[2][l], h3 = L->h[3][l];
+        uint64_t p0 = (uint64_t)o0 * (h0 | 1u);
+        uint64_t p1 = (uint64_t)o2 * (h1 | 1u);
+        uint32_t lo0 = (uint32_t)p0, hi0 = (uint32_t)(p0 >> 32);
+        uint32_t lo1 = (uint32_t)p1, hi1 = (uint32_t)(p1 >> 32);
+        uint32_t n0 = o1 ^ hi1 ^ lo1;
+        uint32_t n1 = rotl(lo1, 16) ^ h2;
+        uint32_t n2 = o3 ^ hi0 ^ lo0;
+        uint32_t n3 = rotl(lo0, 16) ^ h3;
+        h0 ^= rotl(h1, 7);
+        h1 ^= rotl(h2, 13);
+        h2 ^= rotl(h3, 22);
+        h3 ^= rotl(h0, 3);
+        h0 = (h0 + CLOCK_WEYL) ^ n0;
+        L->o[0][l] = n0, L->o[1][l] = n1, L->o[2][l] = n2, L->o[3][l] = n3;
+        L->h[0][l] = h0, L->h[1][l] = h1, L->h[2][l] = h2, L->h[3][l] = h3;
     }
 }
 
