@@ -57,7 +57,7 @@ Apple M4, one thread, `pixi run bench`, 2^24 doubles, minimum of seven runs:
 
 | | GiB/s |
 |---|---|
-| `tandem_runif(rng, n)` | 10.4 |
+| `tandem_runif(rng, n)` | 11.4 |
 | `runif(n)` with Tandem as the user-supplied generator | 2.05 |
 | `runif(n)`, Mersenne-Twister | 2.2 |
 
