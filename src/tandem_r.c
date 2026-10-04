@@ -412,18 +412,11 @@ SEXP R_tandem_rnorm(SEXP rng, SEXP n) {
     return out;
 }
 
-SEXP R_tandem_rexp(SEXP rng, SEXP n, SEXP rate) {
+SEXP R_tandem_rexp(SEXP rng, SEXP n) {
     size_t len = parse_n(n);
-    double r = asReal(rate);
-    SEXP out;
-    tandem_rng *g;
-    if (!(r > 0) || !R_FINITE(r)) error("'rate' must be positive and finite");
-    out = PROTECT(allocVector(REALSXP, (R_xlen_t)len));
-    g = unwrap(rng);
+    SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)len));
+    tandem_rng *g = unwrap(rng);
     tandem_fill_exponential_f64(g, REAL(out), len);
-    /* A division, not a product by 1/rate, so that Exp(rate) is the correctly rounded e / rate. */
-    if (r != 1)
-        for (size_t i = 0; i < len; i++) REAL(out)[i] /= r;
     sync_position(rng, g);
     UNPROTECT(1);
     return out;
@@ -612,7 +605,7 @@ static const R_CallMethodDef calls[] = {
     {"R_tandem_below", (DL_FUNC)&R_tandem_below, 4},
     {"R_tandem_rnorm", (DL_FUNC)&R_tandem_rnorm, 2},
     {"R_tandem_normal_hash", (DL_FUNC)&R_tandem_normal_hash, 0},
-    {"R_tandem_rexp",(DL_FUNC)&R_tandem_rexp, 3},
+    {"R_tandem_rexp", (DL_FUNC)&R_tandem_rexp, 2},
     {"R_tandem_exponential_hash", (DL_FUNC)&R_tandem_exponential_hash, 0},
     {"R_tandem_split", (DL_FUNC)&R_tandem_split, 2},
     {"R_tandem_sub", (DL_FUNC)&R_tandem_sub, 2},

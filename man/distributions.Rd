@@ -12,19 +12,22 @@ tandem_sample_int(rng, n, max)
 
 tandem_below(rng, n, max)
 
-tandem_rnorm(rng, n)
+tandem_rnorm(rng, n, mean = 0, sd = 1)
 
 tandem_rexp(rng, n, rate = 1)
 }
 \arguments{
 \item{rng}{A \code{tandem_rng} object.}
 
-\item{n}{The number of values.}
+\item{n}{The number of values. \code{tandem_rnorm()} and \code{tandem_rexp()} take a vector as its
+length, as \code{\link[=rnorm]{rnorm()}} does.}
 
 \item{max}{The number of values to choose from, an integer-valued number or decimal string in
 \verb{[1, 2^53]}, where \code{2^53} itself needs the string form.}
 
-\item{rate}{The rate of the exponential, a positive finite number.}
+\item{mean, sd}{Means and standard deviations, recycled to \code{n} as in \code{\link[=rnorm]{rnorm()}}.}
+
+\item{rate}{Positive rates, recycled to \code{n} as in \code{\link[=rexp]{rexp()}}.}
 }
 \value{
 An integer or double vector.

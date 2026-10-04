@@ -108,7 +108,7 @@ print.tandem_rng <-function(x, ...) {
 #' read as negative. `tandem_rbool()` returns single stream bits.
 #'
 #' @param rng A `tandem_rng` object.
-#' @param n The number of values.
+#' @param n The number of values, or a vector whose length is the number, as for [runif()].
 #' @param bits The word width: 8, 16, 32 or 64.
 #' @return A double vector, a logical vector for `tandem_rbool()`, and an `integer64` or
 #'   character vector for 64-bit words.
@@ -121,19 +121,19 @@ NULL
 
 #' @rdname draws
 #' @export
-tandem_runif <- function(rng, n) .Call(R_tandem_runif, rng, as.double(n))
+tandem_runif <- function(rng, n) .Call(R_tandem_runif, rng, draw_count(n))
 
 #' @rdname draws
 #' @export
-tandem_rsingle <- function(rng, n) .Call(R_tandem_rsingle, rng, as.double(n))
+tandem_rsingle <- function(rng, n) .Call(R_tandem_rsingle, rng, draw_count(n))
 
 #' @rdname draws
 #' @export
 tandem_rbits <- function(rng, n, bits = 32) {
   if (identical(as.integer(bits), 64L)) {
-    return(.Call(R_tandem_rbits64, rng, as.double(n), !bit64_available()))
+    return(.Call(R_tandem_rbits64, rng, draw_count(n), !bit64_available()))
   }
-  .Call(R_tandem_rbits, rng, as.double(n), as.integer(bits))
+  .Call(R_tandem_rbits, rng, draw_count(n), as.integer(bits))
 }
 
 # A function so that tests can exercise both result types.
@@ -141,7 +141,10 @@ bit64_available <- function() requireNamespace("bit64", quietly = TRUE)
 
 #' @rdname draws
 #' @export
-tandem_rbool <- function(rng, n) .Call(R_tandem_rbool, rng, as.double(n))
+tandem_rbool <- function(rng, n) .Call(R_tandem_rbool, rng, draw_count(n))
+
+# As in runif() and the other base samplers, a vector n asks for length(n) values.
+draw_count <- function(n) as.double(if (length(n) > 1L) length(n) else n)
 
 #' Random access
 #'
@@ -200,10 +203,12 @@ tandem_at <- function(rng, type, i) {
 #' not return these values.
 #'
 #' @param rng A `tandem_rng` object.
-#' @param n The number of values.
+#' @param n The number of values. `tandem_rnorm()` and `tandem_rexp()` take a vector as its
+#'   length, as [rnorm()] does.
 #' @param max The number of values to choose from, an integer-valued number or decimal string in
 #'   `[1, 2^53]`, where `2^53` itself needs the string form.
-#' @param rate The rate of the exponential, a positive finite number.
+#' @param mean,sd Means and standard deviations, recycled to `n` as in [rnorm()].
+#' @param rate Positive rates, recycled to `n` as in [rexp()].
 #' @return An integer or double vector.
 #' @examples
 #' rng <- tandem(42)
@@ -224,11 +229,21 @@ tandem_below <- function(rng, n, max) .Call(R_tandem_below, rng, as.double(n), m
 
 #' @rdname distributions
 #' @export
-tandem_rnorm <- function(rng, n) .Call(R_tandem_rnorm, rng, as.double(n))
+tandem_rnorm <- function(rng, n, mean = 0, sd = 1) {
+  if (!length(sd) || anyNA(sd) || any(sd < 0)) stop("'sd' must be nonnegative")
+  z <- .Call(R_tandem_rnorm, rng, draw_count(n))
+  if (identical(mean, 0) && identical(sd, 1)) return(z)
+  rep_len(mean, length(z)) + rep_len(sd, length(z)) * z
+}
 
 #' @rdname distributions
 #' @export
-tandem_rexp <- function(rng, n, rate = 1) .Call(R_tandem_rexp, rng, as.double(n), as.double(rate))
+tandem_rexp <- function(rng, n, rate = 1) {
+  if (!length(rate) || anyNA(rate) || any(rate <= 0)) stop("'rate' must be positive")
+  e <- .Call(R_tandem_rexp, rng, draw_count(n))
+  # A division, not a product by 1 / rate, so that each value is the correctly rounded e / rate.
+  if (identical(rate, 1)) e else e / rep_len(rate, length(e))
+}
 
 #' Derived generators
 #'

@@ -399,8 +399,12 @@ test_that("an empty exponential fill leaves an unaligned position alone", {
   expect_identical(tandem_position(rng), 1)
 })
 
-test_that("a rate divides the unit exponentials", {
-  expect_identical(tandem_rexp(tandem(42), 50, 2.5), tandem_rexp(tandem(42), 50) / 2.5)
+test_that("parameters recycle and a vector n counts its length, as in base R samplers", {
+  rate <- c(0.5, 2, 4)
+  expect_identical(tandem_rexp(tandem(42), 50, rate), tandem_rexp(tandem(42), 50) / rep_len(rate, 50))
+  expect_identical(tandem_rnorm(tandem(42), 5, mean = 1:5, sd = 2),
+                   1:5 + 2 * tandem_rnorm(tandem(42), 5))
+  expect_identical(tandem_runif(tandem(42), c(9, 9, 9)), tandem_runif(tandem(42), 3))
 })
 
 test_that("exponentials have the moments and distribution of Exp(1)", {

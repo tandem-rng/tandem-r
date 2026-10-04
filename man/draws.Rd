@@ -19,7 +19,7 @@ tandem_rbool(rng, n)
 \arguments{
 \item{rng}{A \code{tandem_rng} object.}
 
-\item{n}{The number of values.}
+\item{n}{The number of values, or a vector whose length is the number, as for \code{\link[=runif]{runif()}}.}
 
 \item{bits}{The word width: 8, 16, 32 or 64.}
 }

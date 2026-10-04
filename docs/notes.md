@@ -58,9 +58,9 @@ character vector of 16 lowercase hex digits per word, most significant digit fir
 position, without moving the generator, for `"u32"`, `"u64"`, `"f32"` and `"f64"`. Elements
 count from 0, as in the specification. `i` may be a vector.
 
-`tandem_sample_int(rng, n, max)`, `tandem_below(rng, n, max)`, `tandem_rnorm(rng, n)` and
-`tandem_rexp(rng, n, rate = 1)` draw bounded integers, standard normals and exponentials from a
-generator, not from the base R hook. They follow Appendix A of the specification, which is not
+`tandem_sample_int(rng, n, max)`, `tandem_below(rng, n, max)`,
+`tandem_rnorm(rng, n, mean = 0, sd = 1)` and `tandem_rexp(rng, n, rate = 1)` draw bounded
+integers, normals and exponentials from a generator, not from the base R hook. They follow Appendix A of the specification, which is not
 normative, through the C library's fills, so they equal tandem-c's values bit for bit. `tandem_below()` returns the C fill,
 uniform on `0..(max - 1)`, and `tandem_sample_int()` adds 1, so it is uniform on `1..max` like
 `sample.int(max, n, replace = TRUE)`.
