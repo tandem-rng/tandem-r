@@ -3,10 +3,13 @@
 \name{distributions}
 \alias{distributions}
 \alias{tandem_sample_int}
+\alias{tandem_below}
 \alias{tandem_rnorm}
 \title{Bounded integers and normals}
 \usage{
 tandem_sample_int(rng, n, max)
+
+tandem_below(rng, n, max)
 
 tandem_rnorm(rng, n)
 }
@@ -15,7 +18,7 @@ tandem_rnorm(rng, n)
 
 \item{n}{The number of values.}
 
-\item{max}{The exclusive upper bound, an integer-valued number or decimal string in
+\item{max}{The number of values to choose from, an integer-valued number or decimal string in
 \verb{[1, 2^53]}, where \code{2^53} itself needs the string form.}
 }
 \value{
@@ -27,12 +30,14 @@ library, which follow the shared C++ core of the CUDA port, so every port return
 from the same generator.
 }
 \details{
-\code{tandem_sample_int()} returns \code{n} integers uniform on \verb{[0, max)}, drawn with replacement.
-The values start at 0, unlike R's \code{sample.int()}. Element \code{i} maps stream word \code{i} by Lemire's
-multiply-and-reject method, and a rejected word retries on a fallback generator derived from
-the generator by index \code{i}, so a fill uses exactly \code{n} words whatever is rejected. It reads
-32-bit words when \code{max} is below \code{2^32} and 64-bit words above. The result is an
-integer vector when \code{max <= 2^31} and a double vector otherwise.
+\code{tandem_sample_int()} returns \code{n} integers uniform on \verb{1..max}, drawn with replacement, as
+\code{sample.int(max, n, replace = TRUE)} does. It is the C bounded fill plus 1. \code{tandem_below()}
+returns the fill itself, on \verb{0..(max - 1)}, which is the form the other ports return. Element
+\code{i} maps stream word \code{i} by Lemire's multiply-and-reject method, and a rejected word retries
+on a fallback generator derived from the generator by index \code{i}, so a fill uses exactly \code{n}
+words whatever is rejected. It reads 32-bit words when \code{max} is below \code{2^32} and 64-bit words
+above. The result is an integer vector when every value is at most \code{2^31 - 1} and a double
+vector otherwise.
 
 \code{tandem_rnorm()} returns \code{n} standard normals by the Box-Muller transform. Pair \code{j}, elements
 \verb{2j} and \verb{2j + 1}, comes from the Float64 draws \verb{2j} and \verb{2j + 1} as \code{u} and \code{v}, with \code{u}
@@ -40,15 +45,10 @@ mapped to \verb{(0, 1]}: \verb{r = sqrt(-2 log u)}, the cosine half \verb{r cos(
 half \verb{r sin(2 pi v)} second. An odd \code{n} uses the cosine half of its last pair and still
 advances past both draws, so a fill consumes \verb{2 ceiling(n / 2)} draws. Values agree across
 ports to about 1e-12 relative, since libm functions differ in the last places.
-
-[0, max)\verb{, drawn with replacement. The values start at 0, unlike R's }sample.int()\verb{. Element }i\verb{maps stream word}i\verb{by Lemire's multiply-and-reject method, and a rejected word retries on a fallback generator derived from the generator by index}i\verb{, so a fill uses exactly }n\verb{words whatever is rejected. It reads 32-bit words when}max\verb{is below}2^32\verb{and 64-bit words above. The result is an integer vector when}max <= 2^31` and a double vector otherwise.
-
-\code{tandem_rnorm()} returns \code{n} standard normals by the Box-Muller transform. Pair \code{j}, elements
-\verb{2j} and \verb{2j + 1}, comes from the Float64 draws \verb{2j} and \verb{2j + 1} as \code{u} and \code{v}, with \code{u}
-mapped to `(0, 1]: R:0,\%20max)\%60,\%20drawn\%20with\%20replacement.\%0AThe\%20values\%20start\%20at\%200,\%20unlike\%20R's\%20\%60sample.int()\%60.\%20Element\%20\%60i\%60\%20maps\%20stream\%20word\%20\%60i\%60\%20by\%20Lemire's\%0Amultiply-and-reject\%20method,\%20and\%20a\%20rejected\%20word\%20retries\%20on\%20a\%20fallback\%20generator\%20derived\%20from\%0Athe\%20generator\%20by\%20index\%20\%60i\%60,\%20so\%20a\%20fill\%20uses\%20exactly\%20\%60n\%60\%20words\%20whatever\%20is\%20rejected.\%20It\%20reads\%0A32-bit\%20words\%20when\%20\%60max\%60\%20is\%20below\%20\%602\%5E32\%60\%20and\%2064-bit\%20words\%20above.\%20The\%20result\%20is\%20an\%0Ainteger\%20vector\%20when\%20\%60max\%20\%3C=\%202\%5E31\%60\%20and\%20a\%20double\%20vector\%20otherwise.\%0A\%0A\%60tandem_rnorm()\%60\%20returns\%20\%60n\%60\%20standard\%20normals\%20by\%20the\%20Box-Muller\%20transform.\%20Pair\%20\%60j\%60,\%20elements\%0A\%602j\%60\%20and\%20\%602j\%20+\%201\%60,\%20comes\%20from\%20the\%20Float64\%20draws\%20\%602j\%60\%20and\%20\%602j\%20+\%201\%60\%20as\%20\%60u\%60\%20and\%20\%60v\%60,\%20with\%20\%60u\%60\%0Amapped\%20to\%20\%60(0,\%201
 }
 \examples{
 rng <- tandem(42)
 tandem_sample_int(rng, 5, 6)
+tandem_below(rng, 5, 6)
 tandem_rnorm(rng, 3)
 }

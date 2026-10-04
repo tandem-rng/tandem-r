@@ -174,12 +174,14 @@ tandem_at <- function(rng, type, i) {
 #' library, which follow the shared C++ core of the CUDA port, so every port returns the same values
 #' from the same generator.
 #'
-#' `tandem_sample_int()` returns `n` integers uniform on `[0, max)`, drawn with replacement.
-#' The values start at 0, unlike R's `sample.int()`. Element `i` maps stream word `i` by Lemire's
-#' multiply-and-reject method, and a rejected word retries on a fallback generator derived from
-#' the generator by index `i`, so a fill uses exactly `n` words whatever is rejected. It reads
-#' 32-bit words when `max` is below `2^32` and 64-bit words above. The result is an
-#' integer vector when `max <= 2^31` and a double vector otherwise.
+#' `tandem_sample_int()` returns `n` integers uniform on `1..max`, drawn with replacement, as
+#' `sample.int(max, n, replace = TRUE)` does. It is the C bounded fill plus 1. `tandem_below()`
+#' returns the fill itself, on `0..(max - 1)`, which is the form the other ports return. Element
+#' `i` maps stream word `i` by Lemire's multiply-and-reject method, and a rejected word retries
+#' on a fallback generator derived from the generator by index `i`, so a fill uses exactly `n`
+#' words whatever is rejected. It reads 32-bit words when `max` is below `2^32` and 64-bit words
+#' above. The result is an integer vector when every value is at most `2^31 - 1` and a double
+#' vector otherwise.
 #'
 #' `tandem_rnorm()` returns `n` standard normals by the Box-Muller transform. Pair `j`, elements
 #' `2j` and `2j + 1`, comes from the Float64 draws `2j` and `2j + 1` as `u` and `v`, with `u`
@@ -190,19 +192,24 @@ tandem_at <- function(rng, type, i) {
 #'
 #' @param rng A `tandem_rng` object.
 #' @param n The number of values.
-#' @param max The exclusive upper bound, an integer-valued number or decimal string in
+#' @param max The number of values to choose from, an integer-valued number or decimal string in
 #'   `[1, 2^53]`, where `2^53` itself needs the string form.
 #' @return An integer or double vector.
 #' @examples
 #' rng <- tandem(42)
 #' tandem_sample_int(rng, 5, 6)
+#' tandem_below(rng, 5, 6)
 #' tandem_rnorm(rng, 3)
 #' @name distributions
 NULL
 
 #' @rdname distributions
 #' @export
-tandem_sample_int <- function(rng, n, max) .Call(R_tandem_sample_int, rng, as.double(n), max)
+tandem_sample_int <- function(rng, n, max) .Call(R_tandem_below, rng, as.double(n), max, 1L)
+
+#' @rdname distributions
+#' @export
+tandem_below <- function(rng, n, max) .Call(R_tandem_below, rng, as.double(n), max, 0L)
 
 #' @rdname distributions
 #' @export

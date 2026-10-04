@@ -366,28 +366,33 @@ SEXP R_tandem_rbool(SEXP rng, SEXP n) {
 
 /* ---- Bounded integers and normals ------------------------------------------------------- */
 
-/* n draws uniform on [0, max). */
-SEXP R_tandem_sample_int(SEXP rng, SEXP n, SEXP max) {
+/* n draws uniform on [0, max), or on [1, max] when one is 1. */
+SEXP R_tandem_below(SEXP rng, SEXP n, SEXP max, SEXP one) {
     size_t len = parse_n(n);
     uint64_t range = parse_u64(max, "max");
+    int base = asInteger(one);
     tandem_rng *g;
     SEXP out;
     if (range < 1 || range > (uint64_t)1 << 53) error("max must be in [1, 2^53]");
     g = unwrap(rng);
-    if (range <= (uint64_t)1 << 31) {
-        /* The fill writes u32 values, which fit R integers. */
+    if (range + (uint64_t)base <= (uint64_t)1 << 31) {
+        /* The fill writes u32 values, which fit R integers once shifted. */
+        int *x;
         out = PROTECT(allocVector(INTSXP, (R_xlen_t)len));
-        tandem_fill_u32_below(g, (uint32_t *)INTEGER(out), len, (uint32_t)range);
+        x = INTEGER(out);
+        tandem_fill_u32_below(g, (uint32_t *)x, len, (uint32_t)range);
+        if (base)
+            for (size_t i = 0; i < len; i++) x[i]++;
     } else if (range <= UINT32_MAX) {
         uint32_t *u = (uint32_t *)R_alloc(len ? len : 1, sizeof *u);
         out = PROTECT(allocVector(REALSXP, (R_xlen_t)len));
         tandem_fill_u32_below(g, u, len, (uint32_t)range);
-        for (size_t i = 0; i < len; i++) REAL(out)[i] = (double)u[i];
+        for (size_t i = 0; i < len; i++) REAL(out)[i] = (double)u[i] + base;
     } else {
         uint64_t *u = (uint64_t *)R_alloc(len ? len : 1, sizeof *u);
         out = PROTECT(allocVector(REALSXP, (R_xlen_t)len));
         tandem_fill_u64_below(g, u, len, range);
-        for (size_t i = 0; i < len; i++) REAL(out)[i] = (double)u[i];
+        for (size_t i = 0; i < len; i++) REAL(out)[i] = (double)u[i] + base;
     }
     sync_position(rng, g);
     UNPROTECT(1);
@@ -514,7 +519,7 @@ static const R_CallMethodDef calls[] = {
     {"R_tandem_rbits64", (DL_FUNC)&R_tandem_rbits64, 3},
     {"R_tandem_at", (DL_FUNC)&R_tandem_at, 4},
     {"R_tandem_rbool", (DL_FUNC)&R_tandem_rbool, 2},
-    {"R_tandem_sample_int", (DL_FUNC)&R_tandem_sample_int, 3},
+    {"R_tandem_below", (DL_FUNC)&R_tandem_below, 4},
     {"R_tandem_rnorm", (DL_FUNC)&R_tandem_rnorm, 2},
     {"R_tandem_split", (DL_FUNC)&R_tandem_split, 2},
     {"R_tandem_sub", (DL_FUNC)&R_tandem_sub, 2},

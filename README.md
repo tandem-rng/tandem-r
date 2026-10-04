@@ -19,7 +19,8 @@ w <- tandem_rbits(rng, 10, 32)       # unsigned 32-bit words, as doubles
 w64 <- tandem_rbits(rng, 10, 64)     # 64-bit words: integer64 with bit64, else hex strings
 b <- tandem_rbool(rng, 10)           # single stream bits
 x <- tandem_at(rng, "f64", c(0, 5, 1e6))  # elements of the next fill, without drawing
-i <- tandem_sample_int(rng, 10, 6)   # uniform on 0..5, Lemire bounded, as in core.hpp
+i <- tandem_sample_int(rng, 10, 6)   # uniform on 1..6, like sample.int(6, 10, TRUE)
+j <- tandem_below(rng, 10, 6)        # the same fill on 0..5, as the other ports return it
 z <- tandem_rnorm(rng, 10)           # standard normals by Box-Muller, as in core.hpp
 worker <- tandem_split(rng, 7)       # by index, from the key alone
 kids <- tandem_fork(rng, 4)          # from the current block, parent moves on
@@ -57,14 +58,16 @@ character vector of 16 lowercase hex digits per word, most significant digit fir
 position, without moving the generator, for `"u32"`, `"u64"`, `"f32"` and `"f64"`. Elements
 count from 0, as in the specification. `i` may be a vector.
 
-`tandem_sample_int(rng, n, max)` and `tandem_rnorm(rng, n)` draw bounded integers and
+`tandem_sample_int(rng, n, max)`, `tandem_below(rng, n, max)` and `tandem_rnorm(rng, n)` draw
+bounded integers and
 standard normals from a generator, not from the base R hook. They are not part of the
 specification. They are the C library's bounded fills and normals, which follow the CUDA
-port's `core.hpp`, so every port returns the same values. Integers are uniform on `[0, max)`.
+port's `core.hpp`, so every port returns the same values. `tandem_below()` returns the C fill,
+uniform on `0..(max - 1)`, and `tandem_sample_int()` adds 1, so it is uniform on `1..max` like
+`sample.int(max, n, replace = TRUE)`.
 Element `i` maps stream word `i` by Lemire's multiply-and-reject method, and a rejected word
 retries on a fallback generator derived by index `i`, so a fill uses exactly `n` words. It reads
-32-bit words, or 64-bit words for `max`
-above `2^32 - 1`, and counts from 0 where R's `sample.int()` counts from 1. Normals come in
+32-bit words, or 64-bit words for `max` above `2^32 - 1`. Normals come in
 Box-Muller pairs: elements `2j` and `2j + 1` are the cosine and sine halves from the Float64
 draws `2j` and `2j + 1`, and an odd count still consumes both draws of its last pair.
 

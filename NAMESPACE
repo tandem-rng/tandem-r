@@ -3,6 +3,7 @@
 S3method(print,tandem_rng)
 export(tandem)
 export(tandem_at)
+export(tandem_below)
 export(tandem_chunk_length)
 export(tandem_fork)
 export(tandem_from_key)

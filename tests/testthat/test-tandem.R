@@ -282,16 +282,29 @@ after_bit <- function() {
 }
 
 test_that("bounded fills match the CUDA core", {
-  # tandem_sample_int draws 64-bit words only for ranges above 2^32 - 1, and the values must fit
+  # tandem_below draws 64-bit words only for ranges above 2^32 - 1, and the values must fit
   # doubles, so of the 64-bit cases only 10^12 applies.
   for (cases in list(cross$fill_u32, cross$fill_u64[3])) {
     for (case in cases) {
       rng <- after_bit()
-      got <- tandem_sample_int(rng, 64, case$n)
+      got <- tandem_below(rng, 64, case$n)
       expect_equal(as.numeric(got), as.numeric(unlist(case$want)))
       expect_identical(tandem_position(rng), as.numeric(case$end_pos))
     }
   }
+})
+
+test_that("sample_int is the bounded fill on 1..max, as sample.int", {
+  for (case in cross$fill_u32) {
+    rng <- after_bit()
+    got <- tandem_sample_int(rng, 64, case$n)
+    expect_equal(as.numeric(got), as.numeric(unlist(case$want)) + 1)
+    expect_identical(tandem_position(rng), as.numeric(case$end_pos))
+  }
+  expect_type(tandem_sample_int(tandem(1), 3, 2147483647), "integer")
+  expect_type(tandem_sample_int(tandem(1), 3, 2147483648), "double")
+  expect_type(tandem_below(tandem(1), 3, 2147483648), "integer")
+  expect_identical(tandem_sample_int(tandem(1), 1, 1), 1L)
 })
 
 test_that("normals match the CUDA core", {
