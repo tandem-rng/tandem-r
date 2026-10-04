@@ -279,10 +279,42 @@ SEXP R_tandem_rbits(SEXP rng, SEXP n, SEXP bits) {
         tandem_fill_u8(g, u, len);
         for (size_t i = len; i-- > 0;) x[i] = (double)u[i];
     } else {
-        error("bits must be 8, 16 or 32");
+        error("bits must be 8, 16, 32 or 64");
     }
     sync_position(rng, g);
     UNPROTECT(1);
+    return out;
+}
+
+/* Unsigned 64-bit words have no exact R type. They go out as bit64's integer64, a double
+ * vector holding the two's complement bit patterns, or as 16 lowercase hex digits each. */
+static SEXP u64_hex(const uint64_t *v, size_t n) {
+    SEXP out = PROTECT(allocVector(STRSXP, (R_xlen_t)n));
+    char s[17];
+    for (size_t i = 0; i < n; i++) {
+        snprintf(s, sizeof s, "%016llx", (unsigned long long)v[i]);
+        SET_STRING_ELT(out, (R_xlen_t)i, mkChar(s));
+    }
+    UNPROTECT(1);
+    return out;
+}
+
+static SEXP u64_integer64(const uint64_t *v, size_t n) {
+    SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)n)), cls = PROTECT(mkString("integer64"));
+    if (n) memcpy(REAL(out), v, n * sizeof *v);
+    setAttrib(out, R_ClassSymbol, cls);
+    UNPROTECT(2);
+    return out;
+}
+
+SEXP R_tandem_rbits64(SEXP rng, SEXP n, SEXP hex) {
+    size_t len = parse_n(n);
+    tandem_rng *g = unwrap(rng);
+    uint64_t *v = (uint64_t *)R_alloc(len ? len : 1, sizeof *v);
+    SEXP out;
+    tandem_fill_u64(g, v, len);
+    sync_position(rng, g);
+    out = asLogical(hex) ? u64_hex(v, len) : u64_integer64(v, len);
     return out;
 }
 
@@ -404,6 +436,7 @@ static const R_CallMethodDef calls[] = {
     {"R_tandem_runif", (DL_FUNC)&R_tandem_runif, 2},
     {"R_tandem_rsingle", (DL_FUNC)&R_tandem_rsingle, 2},
     {"R_tandem_rbits", (DL_FUNC)&R_tandem_rbits, 3},
+    {"R_tandem_rbits64", (DL_FUNC)&R_tandem_rbits64, 3},
     {"R_tandem_rbool", (DL_FUNC)&R_tandem_rbool, 2},
     {"R_tandem_split", (DL_FUNC)&R_tandem_split, 2},
     {"R_tandem_sub", (DL_FUNC)&R_tandem_sub, 2},

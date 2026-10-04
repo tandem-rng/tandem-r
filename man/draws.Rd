@@ -21,10 +21,11 @@ tandem_rbool(rng, n)
 
 \item{n}{The number of values.}
 
-\item{bits}{The word width: 8, 16 or 32.}
+\item{bits}{The word width: 8, 16, 32 or 64.}
 }
 \value{
-A double vector, or a logical vector for \code{tandem_rbool()}.
+A double vector, a logical vector for \code{tandem_rbool()}, and an \code{integer64} or
+character vector for 64-bit words.
 }
 \description{
 Every draw aligns the position to the width of the value, reads, and advances past it,
@@ -34,7 +35,10 @@ as the specification requires. A fill of \code{n} values equals \code{n} scalar 
 \code{tandem_runif()} returns the specification's Float64 mapping, \verb{(raw >> 11) * 2^-53}, and
 \code{tandem_rsingle()} the Float32 mapping \verb{(raw >> 8) * 2^-24} as doubles. \code{tandem_rbits()}
 returns unsigned words of 8, 16 or 32 bits as doubles, since 32-bit words do not fit R
-integers. \code{tandem_rbool()} returns single stream bits.
+integers. With \code{bits = 64} it returns \code{bit64::integer64} when the suggested package bit64
+is installed, and otherwise a character vector of 16 lowercase hex digits per word. An
+\code{integer64} holds the word as a signed two's complement value, so words from \code{2^63} on
+read as negative. \code{tandem_rbool()} returns single stream bits.
 }
 \examples{
 rng <- tandem(42)

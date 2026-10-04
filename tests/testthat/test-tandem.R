@@ -150,7 +150,7 @@ test_that("arguments are checked", {
   expect_error(tandem("340282366920938463463374607431768211456"), "exceeds")
   expect_error(tandem(1, K = 3), "power of two")
   expect_error(tandem_from_key("0123"), "32 digits")
-  expect_error(tandem_rbits(tandem(1), 4, 64), "8, 16 or 32")
+  expect_error(tandem_rbits(tandem(1), 4, 7), "8, 16, 32 or 64")
   expect_error(tandem_key(1), "tandem_rng")
   expect_s3_class(tandem(), "tandem_rng")
   expect_false(identical(tandem_key(tandem()), tandem_key(tandem())))
@@ -201,4 +201,41 @@ test_that("the base R hook state lives in .Random.seed", {
   set.seed(7)
   restore(s)
   expect_identical(runif(5), a)
+})
+
+k1234 <- "00000001000000020000000300000004"
+u64_bytes <- function() {
+  path <- test_path("data", "k1234_K32_u64.bin")
+  readBin(path, "raw", file.size(path))
+}
+
+test_that("64-bit words match the Julia dump as integer64", {
+  skip_if_not_installed("bit64")
+  x <- tandem_rbits(tandem_from_key(k1234, 0, 32), 2048, 64)
+  expect_s3_class(x, "integer64")
+  bits <- x
+  attributes(bits) <- NULL
+  expect_identical(writeBin(bits, raw(), endian = "little"), u64_bytes())
+  rng <- tandem_from_key(k1234, 0, 32)
+  tandem_rbits(rng, 3, 64)
+  expect_identical(tandem_position(rng), 192)
+  expect_length(tandem_rbits(rng, 0, 64), 0)
+})
+
+test_that("64-bit words match the Julia dump as hex without bit64", {
+  testthat::local_mocked_bindings(bit64_available = function() FALSE)
+  x <- tandem_rbits(tandem_from_key(k1234, 0, 32), 2048, 64)
+  expect_type(x, "character")
+  bytes <- matrix(as.character(u64_bytes()), nrow = 8)
+  want <- apply(bytes[8:1, ], 2, paste, collapse = "")
+  expect_identical(x, want)
+  expect_identical(tandem_rbits(tandem(1), 0, 64), character())
+})
+
+test_that("a 64-bit word is two consecutive 32-bit words", {
+  testthat::local_mocked_bindings(bit64_available = function() FALSE)
+  w32 <- tandem_rbits(tandem_from_key(k1234, 0, 32), 6, 32)
+  w64 <- tandem_rbits(tandem_from_key(k1234, 0, 32), 3, 64)
+  hex32 <- function(w) sprintf("%04x%04x", as.integer(w %/% 65536), as.integer(w %% 65536))
+  expect_identical(w64, paste0(hex32(w32[c(2, 4, 6)]), hex32(w32[c(1, 3, 5)])))
 })

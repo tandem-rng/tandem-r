@@ -15,6 +15,6 @@ BugReports: https://github.com/tandem-rng/tandem-r/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 SystemRequirements: C99
-Suggests: testthat (>= 3.0.0), jsonlite, callr, parallel
+Suggests: testthat (>= 3.0.0), jsonlite, callr, parallel, bit64
 Config/testthat/edition: 3
 Config/roxygen2/version: 8.1.0

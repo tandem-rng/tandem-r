@@ -11,6 +11,8 @@ r-roxygen2 = "*"
 r-rcmdcheck = "*"
 c-compiler = "*"
 make = "*"
+r-bit64 = ">=4.8.6,<5"
+r-callr = ">=3.7.6,<4"
 
 [tasks]
 document = "Rscript -e 'roxygen2::roxygenise()'"

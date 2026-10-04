@@ -102,12 +102,16 @@ print.tandem_rng <-function(x, ...) {
 #' `tandem_runif()` returns the specification's Float64 mapping, `(raw >> 11) * 2^-53`, and
 #' `tandem_rsingle()` the Float32 mapping `(raw >> 8) * 2^-24` as doubles. `tandem_rbits()`
 #' returns unsigned words of 8, 16 or 32 bits as doubles, since 32-bit words do not fit R
-#' integers. `tandem_rbool()` returns single stream bits.
+#' integers. With `bits = 64` it returns `bit64::integer64` when the suggested package bit64
+#' is installed, and otherwise a character vector of 16 lowercase hex digits per word. An
+#' `integer64` holds the word as a signed two's complement value, so words from `2^63` on
+#' read as negative. `tandem_rbool()` returns single stream bits.
 #'
 #' @param rng A `tandem_rng` object.
 #' @param n The number of values.
-#' @param bits The word width: 8, 16 or 32.
-#' @return A double vector, or a logical vector for `tandem_rbool()`.
+#' @param bits The word width: 8, 16, 32 or 64.
+#' @return A double vector, a logical vector for `tandem_rbool()`, and an `integer64` or
+#'   character vector for 64-bit words.
 #' @examples
 #' rng <- tandem(42)
 #' u <- tandem_runif(rng, 5)
@@ -125,7 +129,15 @@ tandem_rsingle <- function(rng, n) .Call(R_tandem_rsingle, rng, as.double(n))
 
 #' @rdname draws
 #' @export
-tandem_rbits <- function(rng, n, bits = 32) .Call(R_tandem_rbits, rng, as.double(n), as.integer(bits))
+tandem_rbits <- function(rng, n, bits = 32) {
+  if (identical(as.integer(bits), 64L)) {
+    return(.Call(R_tandem_rbits64, rng, as.double(n), !bit64_available()))
+  }
+  .Call(R_tandem_rbits, rng, as.double(n), as.integer(bits))
+}
+
+# A function so that tests can exercise both result types.
+bit64_available <- function() requireNamespace("bit64", quietly = TRUE)
 
 #' @rdname draws
 #' @export
