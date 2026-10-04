@@ -19,6 +19,8 @@ w <- tandem_rbits(rng, 10, 32)       # unsigned 32-bit words, as doubles
 w64 <- tandem_rbits(rng, 10, 64)     # 64-bit words: integer64 with bit64, else hex strings
 b <- tandem_rbool(rng, 10)           # single stream bits
 x <- tandem_at(rng, "f64", c(0, 5, 1e6))  # elements of the next fill, without drawing
+i <- tandem_sample_int(rng, 10, 6)   # uniform on 0..5, Lemire bounded as in core.hpp
+z <- tandem_rnorm(rng, 10)           # standard normals by Box-Muller, as in core.hpp
 worker <- tandem_split(rng, 7)       # by index, from the key alone
 kids <- tandem_fork(rng, 4)          # from the current block, parent moves on
 tandem_key(rng); tandem_position(rng); tandem_chunk_length(rng)
@@ -54,6 +56,14 @@ character vector of 16 lowercase hex digits per word, most significant digit fir
 `tandem_at(rng, type, i)` reads element `i` of the fill that would start at the current
 position, without moving the generator, for `"u32"`, `"u64"`, `"f32"` and `"f64"`. Elements
 count from 0, as in the specification. `i` may be a vector.
+
+`tandem_sample_int(rng, n, max)` and `tandem_rnorm(rng, n)` draw bounded integers and
+standard normals from a generator, not from the base R hook. They are not part of the
+specification. They use the mappings of `Rng::urand(range)` and `Rng::normal` in the CUDA
+port's `core.hpp`, so every port returns the same values. Integers are uniform on `[0, max)`
+by Lemire's multiply-and-reject method on 32-bit stream words, or on 64-bit words for `max`
+above `2^32 - 1`, and count from 0 where R's `sample.int()` counts from 1. Normal `i` is the
+Box-Muller cosine branch of the Float64 draws `2i` and `2i + 1`.
 
 ## Serialization
 
@@ -93,7 +103,10 @@ saving `.Random.seed`, drawing, restoring and redrawing repeats, across the buff
 that generators survive `saveRDS()`/`readRDS()`, `serialize()`, a `callr` child process and
 forked `parallel::mclapply()` workers at their current position, and compares 64-bit words
 with `k1234_K32_u64.bin` in both result types. Random access is checked against the
-matching fill at several positions and chunk lengths. CI fails when
+matching fill at several positions and chunk lengths. Bounded integers and normals are
+compared with values printed by `core.hpp` compiled on the host: integer ranges that reject
+about half of the draws, the stream position after them, and the first normals and a sum of
+1000 of them. CI fails when
 the vendored C sources in `src/` or the vectors drift from upstream. `tools/sync_c.sh` refreshes the C sources.
 
 ## Speed

@@ -6,6 +6,7 @@
 #include <Rinternals.h>
 #include <R_ext/Rdynload.h>
 #include <R_ext/Random.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -364,6 +365,75 @@ SEXP R_tandem_rbool(SEXP rng, SEXP n) {
     return out;
 }
 
+/* ---- Bounded integers and normals ------------------------------------------------------- */
+
+/* Both mappings are those of Rng::urand(range) and Rng::normal in tandem-cuda's core.hpp, which
+ * the other ports share. They are not part of the specification. */
+
+static uint32_t bounded32(tandem_rng *g, uint32_t range) {
+    uint64_t m = (uint64_t)tandem_next_u32(g) * range;
+    if ((uint32_t)m < range) {
+        uint32_t t = (0u - range) % range;
+        while ((uint32_t)m < t) m = (uint64_t)tandem_next_u32(g) * range;
+    }
+    return (uint32_t)(m >> 32);
+}
+
+static uint64_t mulhi64(uint64_t a, uint64_t b) {
+    uint64_t a0 = a & 0xffffffffu, a1 = a >> 32, b0 = b & 0xffffffffu, b1 = b >> 32;
+    uint64_t mid = a1 * b0 + ((a0 * b0) >> 32);
+    uint64_t mid2 = a0 * b1 + (mid & 0xffffffffu);
+    return a1 * b1 + (mid >> 32) + (mid2 >> 32);
+}
+
+static uint64_t bounded64(tandem_rng *g, uint64_t range) {
+    uint64_t x = tandem_next_u64(g), lo = x * range;
+    if (lo < range) {
+        uint64_t t = (0u - range) % range;
+        while (lo < t) {
+            x = tandem_next_u64(g);
+            lo = x * range;
+        }
+    }
+    return mulhi64(x, range);
+}
+
+/* n draws uniform on [0, max). */
+SEXP R_tandem_sample_int(SEXP rng, SEXP n, SEXP max) {
+    size_t len = parse_n(n);
+    uint64_t range = parse_u64(max, "max");
+    tandem_rng *g;
+    SEXP out;
+    if (range < 1 || range > (uint64_t)1 << 53) error("max must be in [1, 2^53]");
+    g = unwrap(rng);
+    if (range <= (uint64_t)1 << 31) {
+        out = PROTECT(allocVector(INTSXP, (R_xlen_t)len));
+        for (size_t i = 0; i < len; i++) INTEGER(out)[i] = (int)bounded32(g, (uint32_t)range);
+    } else {
+        out = PROTECT(allocVector(REALSXP, (R_xlen_t)len));
+        for (size_t i = 0; i < len; i++)
+            REAL(out)[i] = (double)(range <= UINT32_MAX ? bounded32(g, (uint32_t)range)
+                                                        : bounded64(g, range));
+    }
+    sync_position(rng, g);
+    UNPROTECT(1);
+    return out;
+}
+
+/* Box-Muller: normal i uses uniform draws 2i and 2i + 1, the first mapped to (0, 1]. */
+SEXP R_tandem_rnorm(SEXP rng, SEXP n) {
+    size_t len = parse_n(n);
+    SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)len));
+    tandem_rng *g = unwrap(rng);
+    for (size_t i = 0; i < len; i++) {
+        double u = 1.0 - tandem_next_f64(g), v = tandem_next_f64(g);
+        REAL(out)[i] = sqrt(-2.0 * log(u)) * cos(6.283185307179586 * v);
+    }
+    sync_position(rng, g);
+    UNPROTECT(1);
+    return out;
+}
+
 /* ---- Derived generators ----------------------------------------------------------------- */
 
 SEXP R_tandem_split(SEXP rng, SEXP index) {
@@ -474,6 +544,8 @@ static const R_CallMethodDef calls[] = {
     {"R_tandem_rbits64", (DL_FUNC)&R_tandem_rbits64, 3},
     {"R_tandem_at", (DL_FUNC)&R_tandem_at, 4},
     {"R_tandem_rbool", (DL_FUNC)&R_tandem_rbool, 2},
+    {"R_tandem_sample_int", (DL_FUNC)&R_tandem_sample_int, 3},
+    {"R_tandem_rnorm", (DL_FUNC)&R_tandem_rnorm, 2},
     {"R_tandem_split", (DL_FUNC)&R_tandem_split, 2},
     {"R_tandem_sub", (DL_FUNC)&R_tandem_sub, 2},
     {"R_tandem_fork", (DL_FUNC)&R_tandem_fork, 2},
