@@ -42,11 +42,15 @@ Seeds, positions, indices and purposes are doubles below 2^53, or strings of dec
 for the full 128-bit or 64-bit range. A key is four numbers below 2^32 or 32 hex digits with
 word 0 first. `tandem()` with no seed takes 128 bits from `/dev/urandom`.
 
-With the hook active, `.Random.seed` holds eight integers after the kind code: the key, the
+With the hook active, `.Random.seed` holds ten integers after the kind code: the key, the
 position of the first draw in the hook's buffer of 1024 draws, `K`, and the number of draws
-used from that buffer. R copies them in and out around each call, so saving and restoring
-`.Random.seed` (or `set.seed()`) restores the stream exactly. The hook checks per draw that
-the state still matches its buffer, which costs a little speed, see below.
+used from that buffer, and a 64-bit token that hashes the key, position and `K`. R copies them
+in and out around each call, so saving and restoring
+`.Random.seed` (or `set.seed()`) restores the stream exactly. A draw compares only the token
+with that of its buffer. A restored state brings its own token and so rebuilds the buffer. A
+state whose token does not match its words, for example one built by hand, is rebuilt and given
+the right token. Editing the key, position or `K` of a live state while keeping its token goes
+unnoticed until the buffer is next refilled.
 
 `tandem_rbits()` supports 8, 16 and 32 bits, returned as doubles because 32-bit words do not
 fit R integers. 64-bit words have no exact R type. With the suggested package `bit64`
@@ -122,14 +126,15 @@ Apple M4, one thread, `pixi run bench`, 2^24 doubles, minimum of seven runs:
 | | GiB/s |
 |---|---|
 | `tandem_runif(rng, n)` | 11.4 |
-| `runif(n)` with Tandem as the user-supplied generator | 1.71 |
+| `runif(n)` with Tandem as the user-supplied generator | 2.0 |
 | `runif(n)`, Mersenne-Twister | 2.2 |
 
 The first row is the C fill plus R's allocation of the result. The user-supplied hook returns
 one double per call, so `runif` through it runs at R's call rate. The hook fills a buffer of
-1024 doubles at a time. Keeping its state in `.Random.seed` costs a check per draw that the
-state still matches the buffer, which put the figure below the built-in generator, from 2.05
-GiB/s before the state moved. `pixi run bench` installs the package first, so it measures the
+1024 doubles at a time and keeps its state in `.Random.seed`. A draw checks one 64-bit token
+against the buffer's. The cold
+paths, a rebuild and the move to the next buffer, are kept out of line. `pixi run bench`
+installs the package first, so it measures the
 current sources.
 
 ## AI assistance

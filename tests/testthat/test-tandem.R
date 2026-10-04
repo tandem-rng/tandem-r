@@ -172,8 +172,8 @@ test_that("the base R hook state lives in .Random.seed", {
   seed <- function() get(".Random.seed", globalenv())
   restore <- function(s) assign(".Random.seed", s, globalenv())
   set.seed(42)
-  # Key, position, K and the draws used: 8 words after the kind code.
-  expect_length(seed(), 9)
+  # Key, position, K, draws used and a 64-bit token: 10 words after the kind code.
+  expect_length(seed(), 11)
   words <- hex_num(substring(tandem_key(tandem(42)), c(1, 9, 17, 25), c(8, 16, 24, 32)))
   expect_identical(seed()[2:5] %% 2^32, words)
   # Restoring repeats the draws, including across the 1024-draw buffer edge.
@@ -201,6 +201,21 @@ test_that("the base R hook state lives in .Random.seed", {
   set.seed(7)
   restore(s)
   expect_identical(runif(5), a)
+  # A state without a valid token, as one built by hand, rebuilds from its key and position.
+  set.seed(1)
+  s <- seed()
+  a <- runif(5)
+  s[10:11] <- 0L
+  restore(s)
+  expect_identical(runif(5), a)
+  # A state saved just before a buffer edge restores to the same draws on both sides of it.
+  set.seed(3)
+  runif(1022)
+  s <- seed()
+  a <- runif(4)
+  set.seed(4)
+  restore(s)
+  expect_identical(runif(4), a)
 })
 
 k1234 <- "00000001000000020000000300000004"

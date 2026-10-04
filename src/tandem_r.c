@@ -439,28 +439,53 @@ SEXP R_tandem_fork(SEXP rng, SEXP n) {
  *
  * R copies the array behind user_unif_seedloc() to and from .Random.seed around every
  * call into the generator, so that array is the authoritative state:
- *   key[4], position of the first draw in the buffer (lo, hi), K, draws already used.
- * The buffer and the generator behind it are caches of that state. user_shadow is the
- * key, position and K they were built for; a mismatch means R restored another .Random.seed.
- * The count of draws used does not matter to the buffer, so the draw path does not copy it. */
+ *   key[4], position of the first draw in the buffer (lo, hi), K, draws used, token (lo, hi).
+ * The buffer is a cache of (key, position, K). The token is a 63-bit hash of those seven
+ * words, stored in the state so that it travels with a saved .Random.seed. A draw checks one
+ * 64-bit word, the token, against the token of the cached buffer. Restoring any other state
+ * brings back a different token and rebuilds the buffer. A token that does not match its own
+ * words is replaced on rebuild, so a hand-built state works. Only editing the key, position or
+ * K of a live state while keeping its token goes unnoticed. */
 #define USER_BUF 1024
-#define USER_NSEED 8
-static Int32 user_seed[USER_NSEED], user_shadow[7];
-static int user_valid;
+#define USER_NSEED 10
+static Int32 user_seed[USER_NSEED];
+static uint64_t user_cached; /* token of the buffer's state, 0 when there is none */
 static double user_buf[USER_BUF];
 
-static void user_rebuild(void) {
+static uint64_t user_token(void) {
+    uint64_t h = 0x9e3779b97f4a7c15u;
+    for (int i = 0; i < 7; i++) {
+        h = (h ^ user_seed[i]) * 0xff51afd7ed558cccu;
+        h ^= h >> 32;
+    }
+    return h | 1u;
+}
+
+/* Kept out of line so that the one-draw path stays small. */
+#if defined(__GNUC__)
+#define COLD __attribute__((noinline, cold))
+#define UNLIKELY(x) __builtin_expect((x) != 0, 0)
+#else
+#define COLD
+#define UNLIKELY(x) (x)
+#endif
+
+static void user_set_token(uint64_t t) {
+    user_seed[8] = (Int32)t;
+    user_seed[9] = (Int32)(t >> 32);
+}
+
+COLD static void user_rebuild(void) {
     uint32_t key[4], K = user_seed[6];
     uint64_t pos = (uint64_t)user_seed[4] | (uint64_t)user_seed[5] << 32;
+    tandem_rng g;
     if (K < 1 || K > 65536 || (K & (K - 1u)) || user_seed[7] >= USER_BUF)
         error("'.Random.seed' does not hold a valid Tandem8x32 state");
     for (int w = 0; w < 4; w++) key[w] = user_seed[w];
-    {
-        tandem_rng g = tandem_from_key(key, pos, K);
-        tandem_fill_f64(&g, user_buf, USER_BUF);
-    }
-    memcpy(user_shadow, user_seed, 7 * sizeof(Int32));
-    user_valid = 1;
+    g = tandem_from_key(key, pos, K);
+    tandem_fill_f64(&g, user_buf, USER_BUF);
+    user_cached = user_token();
+    user_set_token(user_cached);
 }
 
 static int user_nseed = USER_NSEED;
@@ -479,28 +504,28 @@ void user_unif_init(Int32 seed) {
     for (int w = 0; w < 4; w++) user_seed[w] = g.key[w];
     user_seed[4] = user_seed[5] = user_seed[7] = 0;
     user_seed[6] = TANDEM_DEFAULT_K;
-    user_valid = 0;
+    user_set_token(user_token());
+    user_cached = 0;
 }
 
-static int user_stale(void) {
-    Int32 diff = 0;
-    for (int i = 0; i < 7; i++) diff |= user_seed[i] ^ user_shadow[i];
-    return diff != 0;
+/* The buffer is spent: move the state to the start of the next one. */
+COLD static void user_advance(void) {
+    uint64_t pos = ((uint64_t)user_seed[4] | (uint64_t)user_seed[5] << 32) + 64u * USER_BUF;
+    user_seed[4] = (Int32)pos;
+    user_seed[5] = (Int32)(pos >> 32);
+    user_seed[7] = 0;
+    user_set_token(user_token());
+    user_cached = 0;
 }
 
 double *user_unif_rand(void) {
+    uint64_t token;
     Int32 used;
-    if (!user_valid || user_stale()) user_rebuild();
+    memcpy(&token, &user_seed[8], sizeof token);
+    if (UNLIKELY(token != user_cached)) user_rebuild();
     used = user_seed[7]++;
-    if (user_seed[7] == USER_BUF) {
-        /* The buffer is spent: move the state to the start of the next one. The next call
-         * refills user_buf, so the draw returned here stays valid until then. */
-        uint64_t pos = ((uint64_t)user_seed[4] | (uint64_t)user_seed[5] << 32) + 64u * USER_BUF;
-        user_seed[4] = (Int32)pos;
-        user_seed[5] = (Int32)(pos >> 32);
-        user_seed[7] = 0;
-        user_valid = 0;
-    }
+    /* The next call refills user_buf, so the draw returned here stays valid until then. */
+    if (UNLIKELY(used == USER_BUF - 1)) user_advance();
     return &user_buf[used];
 }
 
