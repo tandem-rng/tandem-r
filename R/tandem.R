@@ -186,13 +186,12 @@ tandem_at <- function(rng, type, i) {
 #' `2^32` and 64-bit words above. The result is an integer vector when the largest possible value
 #' is at most `2^31 - 1` and a double vector otherwise.
 #'
-#' `tandem_rnorm()` returns `n` standard normals by the Box-Muller transform. Pair `j`, elements
-#' `2j` and `2j + 1`, comes from the Float64 draws `2j` and `2j + 1` as `u` and `v`, with `u`
-#' mapped to `(0, 1]`. With the radius `sqrt(-2 log u)`, the cosine half is the radius times
-#' `cos(2 pi v)` and comes first, and the sine half is the radius times
-#' `sin(2 pi v)`. An odd `n` uses the cosine half of its last pair and still
-#' advances past both draws, so a fill consumes `2 ceiling(n / 2)` draws. The logarithm, sine and
-#' cosine are the polynomials of the C library, so ports that copy them return the same bits.
+#' `tandem_rnorm()` returns `n` standard normals by the 1024-layer ziggurat of Appendix A. Element
+#' `i` comes from the 64-bit draw `i`, so a fill uses exactly `n` draws and a fill cut into pieces
+#' equals the whole fill. A draw outside the inner rectangles, about 0.4 % of them, continues on a
+#' fallback generator keyed by its global draw index, which does not move `rng`. The values are
+#' bit identical across ports. An empty fill aligns the position to 64 bits, as section 5 of the
+#' specification says for every fill.
 #'
 #' `tandem_rexp()` returns `n` exponentials as in Appendix A of the specification. Element `i` is
 #' `-log(1 - u)` for the Float64 draw `u` number `i`, divided by `rate`, so a fill is random

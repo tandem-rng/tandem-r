@@ -7,7 +7,7 @@
 - `tandem_rbits(rng, n, bits)`: 8, 16, 32, or 64-bit words. 64-bit words are `bit64::integer64`
   if `bit64` is installed, else 16-digit hex strings.
 - `tandem_below`, `tandem_sample_int`: bounded integers on `0..max-1` and `1..max`.
-- `tandem_rnorm`, `tandem_rexp`: Box-Muller normals and `-log(1 - u) / rate` exponentials.
+- `tandem_rnorm`, `tandem_rexp`: ziggurat normals and `-log(1 - u) / rate` exponentials.
 - `tandem_split`, `tandem_fork`, `tandem_sub`: child streams.
 - `tandem_at`: elements of the next fill, without drawing, for `"u32"`, `"u64"`, `"f32"`, `"f64"`.
 - `tandem_key`, `tandem_position`, `tandem_set_position`, `tandem_chunk_length`, `tandem_state`,
@@ -34,7 +34,7 @@ b <- tandem_rbool(rng, 10)           # single stream bits
 x <- tandem_at(rng, "f64", c(0, 5, 1e6))  # elements of the next fill, without drawing
 i <- tandem_sample_int(rng, 10, 6)   # uniform on 1..6, like sample.int(6, 10, TRUE)
 j <- tandem_below(rng, 10, 6)        # the same fill on 0..5, as the other ports return it
-z <- tandem_rnorm(rng, 10)           # standard normals by Box-Muller, as in core.hpp
+z <- tandem_rnorm(rng, 10)           # standard normals by the ziggurat of Appendix A
 e <- tandem_rexp(rng, 10, rate = 2)    # exponentials -log(1 - u) / rate, one draw each
 worker <- tandem_split(rng, 7)       # by index, from the key alone
 kids <- tandem_fork(rng, 4)          # from the current block, parent moves on
@@ -85,9 +85,10 @@ uniform on `0..(max - 1)`, and `tandem_sample_int()` adds 1, so it is uniform on
 Element `i` maps stream word `i` by Lemire's multiply-and-reject method, and a rejected word
 retries on a fallback generator derived by the global draw index, the aligned start position over
 the word width plus `i`, so a fill uses exactly `n` words and a fill cut at any element equals
-the whole fill. It reads 32-bit words, or 64-bit words for `max` above `2^32`. Normals come in
-Box-Muller pairs: elements `2j` and `2j + 1` are the cosine and sine halves from the Float64
-draws `2j` and `2j + 1`, and an odd count still consumes both draws of its last pair.
+the whole fill. It reads 32-bit words, or 64-bit words for `max` above `2^32`. Normals use the
+1024-layer ziggurat: element `i` comes from the 64-bit draw `i`, a draw outside the inner
+rectangles continues on a fallback generator keyed by its global draw index, and a fill cut at
+any element equals the whole fill.
 
 Exponentials follow [Appendix A](https://github.com/tandem-rng/spec/blob/main/SPEC.md) of the
 specification: element `i` is `-log(1 - u) / rate` for the Float64 draw `u` number `i`, one draw

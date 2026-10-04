@@ -39,6 +39,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: git clone --depth 1 https://github.com/tandem-rng/tandem-c ../tandem-c
-      - run: diff ../tandem-c/tandem.c src/tandem.c && diff ../tandem-c/tandem.h src/tandem.h
+      - run: for f in tandem.c tandem.h tandem_normal_tables.h; do diff ../tandem-c/$f src/$f; done
       - run: git clone --depth 1 https://github.com/tandem-rng/spec ../spec
       - run: diff ../spec/vectors.json tests/testthat/vectors.json

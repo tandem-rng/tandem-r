@@ -23,30 +23,23 @@ bits <- function(text) {
   apply(matrix(as.character(writeBin(x, raw(), endian = "big")), 8), 2, paste, collapse = "")
 }
 
-normals <- function(text, name) {
-  body <- sub("\\n\\};.*$", "", sub(paste0(".*", name, "\\[(2 \\* )?CROSS_NORMAL_COUNT\\] = \\{"), "", text))
-  bits(strsplit(gsub("\\s+", "", body), ",")[[1]])
-}
-
-# Only the double tables. R has no single precision fill, and the C test pins the floats.
-exponentials <- function(text) {
-  body <- sub("\\n\\};.*$", "", sub(".*CROSS_EXPONENTIAL\\[\\] = \\{", "", text))
+# Rows {start, {doubles}, end_pos} of a double table. Only the double tables: R has no single
+# precision fill, and the C tests pin the floats.
+rows <- function(text, name) {
+  body <- sub("\\n\\};.*$", "", sub(paste0(".*", name, "\\[\\] = \\{"), "", text))
   m <- regmatches(body, gregexpr("\\{[0-9]+ull,[^u]*u\\}", body))[[1]]
   lapply(m, function(s) {
-    nums <- regmatches(s, gregexpr("[0-9]+(\\.[0-9]+)?(e[-+]?[0-9]+)?", s))[[1]]
+    nums <- regmatches(s, gregexpr("-?[0-9]+(\\.[0-9]+)?(e[-+]?[0-9]+)?", s))[[1]]
     list(start = nums[1], want = bits(nums[2:(length(nums) - 1)]), end_pos = nums[length(nums)])
   })
 }
 
 fill <- read("cross_fill_below.h")
-normal <- read("cross_normal.h")
 out <- list(
-  exponential = exponentials(read("cross_exponential.h")),
+  exponential = rows(read("cross_exponential.h"), "CROSS_EXPONENTIAL"),
   fill_u32 = cases(fill, "CROSS_FILL_U32"),
   fill_u64 = cases(fill, "CROSS_FILL_U64"),
-  normal = normals(normal, "CROSS_NORMAL"),
-  normal_end_pos = regmatches(normal, regexpr("[0-9]+(?=u;\\s*\\nstatic const float)", normal,
-                                              perl = TRUE))
+  normal = rows(read("cross_normal.h"), "CROSS_NORMAL")
 )
 jsonlite::write_json(out, "tests/testthat/data/cross_bounded.json", auto_unbox = TRUE,
                      digits = NA)

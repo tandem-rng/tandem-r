@@ -47,13 +47,12 @@ and a fill cut into pieces equals the whole fill. It reads 32-bit words when \co
 \code{2^32} and 64-bit words above. The result is an integer vector when the largest possible value
 is at most \code{2^31 - 1} and a double vector otherwise.
 
-\code{tandem_rnorm()} returns \code{n} standard normals by the Box-Muller transform. Pair \code{j}, elements
-\verb{2j} and \verb{2j + 1}, comes from the Float64 draws \verb{2j} and \verb{2j + 1} as \code{u} and \code{v}, with \code{u}
-mapped to \verb{(0, 1]}. With the radius \verb{sqrt(-2 log u)}, the cosine half is the radius times
-\verb{cos(2 pi v)} and comes first, and the sine half is the radius times
-\verb{sin(2 pi v)}. An odd \code{n} uses the cosine half of its last pair and still
-advances past both draws, so a fill consumes \verb{2 ceiling(n / 2)} draws. The logarithm, sine and
-cosine are the polynomials of the C library, so ports that copy them return the same bits.
+\code{tandem_rnorm()} returns \code{n} standard normals by the 1024-layer ziggurat of Appendix A. Element
+\code{i} comes from the 64-bit draw \code{i}, so a fill uses exactly \code{n} draws and a fill cut into pieces
+equals the whole fill. A draw outside the inner rectangles, about 0.4 \% of them, continues on a
+fallback generator keyed by its global draw index, which does not move \code{rng}. The values are
+bit identical across ports. An empty fill aligns the position to 64 bits, as section 5 of the
+specification says for every fill.
 
 \code{tandem_rexp()} returns \code{n} exponentials as in Appendix A of the specification. Element \code{i} is
 \code{-log(1 - u)} for the Float64 draw \code{u} number \code{i}, divided by \code{rate}, so a fill is random

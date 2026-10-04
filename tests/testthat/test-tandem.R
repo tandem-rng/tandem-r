@@ -341,25 +341,39 @@ test_that("sample_int is the bounded fill on 1..max, as sample.int", {
   expect_identical(tandem_sample_int(tandem(1), 1, 1), 1L)
 })
 
-test_that("normals are bit identical to the CUDA core", {
-  rng <- after_bit()
-  expect_identical(tandem_rnorm(rng, 128), from_bits(cross$normal))
-  expect_identical(tandem_position(rng), as.numeric(cross$normal_end_pos))
+test_that("normals are bit identical to tandem-c's ziggurat fixture", {
+  # The last rows include draws outside the inner rectangles: wedge and tail.
+  for (case in cross$normal) {
+    rng <- at_start(case$start)
+    expect_identical(tandem_rnorm(rng, 64), from_bits(case$want))
+    expect_identical(tandem_position(rng), as.numeric(case$end_pos))
+  }
 })
 
-test_that("an odd count of normals still consumes whole pairs", {
-  rng <- after_bit()
-  expect_identical(tandem_rnorm(rng, 127), from_bits(cross$normal)[1:127])
-  expect_identical(tandem_position(rng), as.numeric(cross$normal_end_pos))
+test_that("a normal fill cut at any element equals the whole fill", {
+  # 3000 draws hold about 13 that leave the inner rectangles and use their fallback stream.
+  whole <- tandem_rnorm(at_start(12345), 3000)
+  for (k in c(1, 2, 31, 33, 1000, 2999)) {
+    rng <- at_start(12345)
+    expect_identical(c(tandem_rnorm(rng, k), tandem_rnorm(rng, 3000 - k)), whole)
+    expect_identical(tandem_position(rng), (ceiling(12345 / 64) + 3000) * 64)
+  }
 })
 
-test_that("pair j of normals is Box-Muller of uniform draws 2j and 2j + 1", {
-  u <- tandem_runif(tandem(42), 20)
-  a <- u[c(TRUE, FALSE)]
-  b <- u[c(FALSE, TRUE)]
-  r <- sqrt(-2 * log(1 - a))
-  z <- as.vector(rbind(r * cos(2 * pi * b), r * sin(2 * pi * b)))
-  expect_equal(tandem_rnorm(tandem(42), 20), z, tolerance = 1e-12)
+test_that("an empty normal fill aligns the position to 64, as section 5 of the spec says", {
+  rng <- after_bit()
+  expect_length(tandem_rnorm(rng, 0), 0)
+  expect_identical(tandem_position(rng), 64)
+})
+
+test_that("normals have the moments and distribution of N(0, 1)", {
+  n <- 1e7
+  x <- tandem_rnorm(tandem(2026), n)
+  # Moments 0, 1, 0, 3 with variances 1, 2, 15, 96.
+  m <- c(0, 1, 0, 3)
+  v <- c(1, 2, 15, 96)
+  for (k in 1:4) expect_lt(abs(mean(x^k) - m[k]) / sqrt(v[k] / n), 4)
+  expect_gt(suppressWarnings(ks.test(x, "pnorm"))$p.value, 1e-3)
 })
 
 test_that("the word width follows the range, 32 bits up to 2^32 inclusive", {
@@ -374,7 +388,7 @@ test_that("the word width follows the range, 32 bits up to 2^32 inclusive", {
 })
 
 test_that("normal fills are bit identical to tandem-c's recorded hash", {
-  expect_identical(.Call(tandemrng:::R_tandem_normal_hash), "9414e1315e2653be")
+  expect_identical(.Call(tandemrng:::R_tandem_normal_hash), "a61cfa844c85f7c1")
 })
 
 test_that("exponentials are bit identical to tandem-c's fixture from the CUDA core", {

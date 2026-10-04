@@ -422,24 +422,21 @@ SEXP R_tandem_rexp(SEXP rng, SEXP n) {
     return out;
 }
 
-/* The bytes of the normal fills tandem-c hashes in tests/test_normal_bits.c, hashed here to show
- * that this build, with R's compiler and flags, produces the same bits. Internal, used by tests. */
+/* The bytes of the f64 normal fills tandem-c hashes in tests/test_normal_bits.c, hashed here to
+ * show that this build, with R's compiler and flags, produces the same bits. R has no f32 normals.
+ * Internal, used by tests. */
 SEXP R_tandem_normal_hash(void) {
-    enum { PAIRS = 1000000 };
+    enum { N = 1000000 };
     const uint64_t starts[] = {0, 1, 77, 12345, (uint64_t)1 << 30};
     uint64_t h = 0xcbf29ce484222325ull;
-    double *d = (double *)R_alloc(2 * PAIRS, sizeof *d);
-    float *f = (float *)R_alloc(2 * PAIRS, sizeof *f);
+    double *d = (double *)R_alloc(N, sizeof *d);
     char text[17];
     for (size_t i = 0; i < sizeof starts / sizeof starts[0]; i++) {
         tandem_rng g = tandem_seed(2026, 7, 0);
         const unsigned char *b = (const unsigned char *)d;
         tandem_set_position(&g, starts[i]);
-        tandem_fill_normal_f64(&g, d, 2 * PAIRS - 1);
-        for (size_t k = 0; k < (2 * PAIRS - 1) * sizeof *d; k++) h = (h ^ b[k]) * 0x100000001b3ull;
-        tandem_fill_normal_f32(&g, f, 2 * PAIRS - 1);
-        b = (const unsigned char *)f;
-        for (size_t k = 0; k < (2 * PAIRS - 1) * sizeof *f; k++) h = (h ^ b[k]) * 0x100000001b3ull;
+        tandem_fill_normal_f64(&g, d, N);
+        for (size_t k = 0; k < N * sizeof *d; k++) h = (h ^ b[k]) * 0x100000001b3ull;
     }
     snprintf(text, sizeof text, "%016llx", (unsigned long long)h);
     return mkString(text);

@@ -11,7 +11,7 @@
 remotes::install_github("tandem-rng/tandem-r")
 ```
 
-The vendored C code is tandem-c at commit `b049384`. The build needs a C99 compiler. For development, `pixi install` creates an environment with
+The vendored C code is tandem-c at commit `121db59`. The build needs a C99 compiler. For development, `pixi install` creates an environment with
 R and the tooling, `pixi run document` regenerates `man/` and `NAMESPACE`, `pixi run test`
 runs the tests and `pixi run check` runs `R CMD check --as-cran`.
 

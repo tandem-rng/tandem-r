@@ -16,12 +16,15 @@ that generators survive `saveRDS()`/`readRDS()`, `serialize()`, a `callr` child 
 forked `parallel::mclapply()` workers at their current position, and compares 64-bit words
 with `k1234_K32_u64.bin` in both result types. Random access is checked against the
 matching fill at several positions and chunk lengths. Bounded integers and normals are
-compared with tandem-c's fixtures, generated from `core.hpp` and converted to
+compared with tandem-c's fixtures, converted to
 `tests/testthat/data/cross_bounded.json` by `tools/gen_cross_fixtures.R`: integer ranges that reject
-about half of the draws, the stream position after them, and 128 normals. A bounded fill cut at
+about a quarter of the draws, the stream position after them, and 64 normals from each of six
+starts, with wedge and tail draws among them. A bounded or normal fill cut at
 an arbitrary element equals the whole fill at an unaligned start with rejections, the word width
-changes at `max = 2^32 + 1`, and a hash of 10^7 normals in both precisions matches tandem-c's
-recorded value, which pins the bits on every compiler CI builds with. Exponentials are compared
+changes at `max = 2^32 + 1`, and a hash of 5 x 10^6 normals matches tandem-c's
+recorded value, which pins the bits on every compiler CI builds with. An empty normal fill aligns
+the position to 64, and 10^7 normals have the first four moments and the Kolmogorov-Smirnov
+statistic of N(0, 1). Exponentials are compared
 bit for bit with tandem-c's fixture, also from `core.hpp`, at five start positions, unaligned ones
 included, and with tandem-c's recorded hash of 10^6 doubles and 10^6 floats from each of those
 starts. A cut fill equals the whole fill, an empty fill leaves the position alone, and 10^7
