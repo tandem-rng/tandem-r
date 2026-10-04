@@ -170,9 +170,8 @@ tandem_at <- function(rng, type, i) {
 
 #' Bounded integers, normals and exponentials
 #'
-#' The bounded fills and normals are not part of the specification. They are the fills of the C
-#' library, which follow the shared C++ core of the CUDA port, so every port returns the same values
-#' from the same generator. Exponentials are in an appendix of the specification.
+#' These draws follow Appendix A of the specification, which is not normative. They are the fills
+#' of the C library, so they equal tandem-c's values bit for bit.
 #'
 #' `tandem_sample_int()` returns `n` integers uniform on `1..max`, drawn with replacement, as
 #' `sample.int(max, n, replace = TRUE)` does. It is the C bounded fill plus 1. `tandem_below()`
@@ -181,16 +180,16 @@ tandem_at <- function(rng, type, i) {
 #' on a fallback generator derived from the generator by the global draw index, the aligned start
 #' position over the word width plus `i`, so a fill uses exactly `n` words whatever is rejected
 #' and a fill cut into pieces equals the whole fill. It reads 32-bit words when `max` is at most
-#' `2^32` and 64-bit words above. The result is an integer vector when every value is at most `2^31 - 1` and a double
-#' vector otherwise.
+#' `2^32` and 64-bit words above. The result is an integer vector when the largest possible value
+#' is at most `2^31 - 1` and a double vector otherwise.
 #'
 #' `tandem_rnorm()` returns `n` standard normals by the Box-Muller transform. Pair `j`, elements
 #' `2j` and `2j + 1`, comes from the Float64 draws `2j` and `2j + 1` as `u` and `v`, with `u`
 #' mapped to `(0, 1]`. With the radius `sqrt(-2 log u)`, the cosine half is the radius times
 #' `cos(2 pi v)` and comes first, and the sine half is the radius times
 #' `sin(2 pi v)`. An odd `n` uses the cosine half of its last pair and still
-#' advances past both draws, so a fill consumes `2 ceiling(n / 2)` draws. Values agree across
-#' ports to about 1e-12 relative, since libm functions differ in the last places.
+#' advances past both draws, so a fill consumes `2 ceiling(n / 2)` draws. The logarithm, sine and
+#' cosine are the polynomials of the C library, so ports that copy them return the same bits.
 #'
 #' `tandem_rexp()` returns `n` exponentials as in Appendix A of the specification. Element `i` is
 #' `-log(1 - u)` for the Float64 draw `u` number `i`, divided by `rate`, so a fill is random

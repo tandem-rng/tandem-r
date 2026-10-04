@@ -30,9 +30,8 @@ tandem_rexp(rng, n, rate = 1)
 An integer or double vector.
 }
 \description{
-The bounded fills and normals are not part of the specification. They are the fills of the C
-library, which follow the shared C++ core of the CUDA port, so every port returns the same values
-from the same generator. Exponentials are in an appendix of the specification.
+These draws follow Appendix A of the specification, which is not normative. They are the fills
+of the C library, so they equal tandem-c's values bit for bit.
 }
 \details{
 \code{tandem_sample_int()} returns \code{n} integers uniform on \verb{1..max}, drawn with replacement, as
@@ -42,16 +41,16 @@ returns the fill itself, on \verb{0..(max - 1)}, which is the form the other por
 on a fallback generator derived from the generator by the global draw index, the aligned start
 position over the word width plus \code{i}, so a fill uses exactly \code{n} words whatever is rejected
 and a fill cut into pieces equals the whole fill. It reads 32-bit words when \code{max} is at most
-\code{2^32} and 64-bit words above. The result is an integer vector when every value is at most \code{2^31 - 1} and a double
-vector otherwise.
+\code{2^32} and 64-bit words above. The result is an integer vector when the largest possible value
+is at most \code{2^31 - 1} and a double vector otherwise.
 
 \code{tandem_rnorm()} returns \code{n} standard normals by the Box-Muller transform. Pair \code{j}, elements
 \verb{2j} and \verb{2j + 1}, comes from the Float64 draws \verb{2j} and \verb{2j + 1} as \code{u} and \code{v}, with \code{u}
 mapped to \verb{(0, 1]}. With the radius \verb{sqrt(-2 log u)}, the cosine half is the radius times
 \verb{cos(2 pi v)} and comes first, and the sine half is the radius times
 \verb{sin(2 pi v)}. An odd \code{n} uses the cosine half of its last pair and still
-advances past both draws, so a fill consumes \verb{2 ceiling(n / 2)} draws. Values agree across
-ports to about 1e-12 relative, since libm functions differ in the last places.
+advances past both draws, so a fill consumes \verb{2 ceiling(n / 2)} draws. The logarithm, sine and
+cosine are the polynomials of the C library, so ports that copy them return the same bits.
 
 \code{tandem_rexp()} returns \code{n} exponentials as in Appendix A of the specification. Element \code{i} is
 \code{-log(1 - u)} for the Float64 draw \code{u} number \code{i}, divided by \code{rate}, so a fill is random

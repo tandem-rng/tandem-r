@@ -60,9 +60,8 @@ count from 0, as in the specification. `i` may be a vector.
 
 `tandem_sample_int(rng, n, max)`, `tandem_below(rng, n, max)`, `tandem_rnorm(rng, n)` and
 `tandem_rexp(rng, n, rate = 1)` draw bounded integers, standard normals and exponentials from a
-generator, not from the base R hook. The bounded integers and normals are not part of the
-specification. They are the C library's bounded fills and normals, which follow the CUDA
-port's `core.hpp`, so every port returns the same values. `tandem_below()` returns the C fill,
+generator, not from the base R hook. They follow Appendix A of the specification, which is not
+normative, through the C library's fills, so they equal tandem-c's values bit for bit. `tandem_below()` returns the C fill,
 uniform on `0..(max - 1)`, and `tandem_sample_int()` adds 1, so it is uniform on `1..max` like
 `sample.int(max, n, replace = TRUE)`.
 Element `i` maps stream word `i` by Lemire's multiply-and-reject method, and a rejected word
