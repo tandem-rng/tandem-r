@@ -1,6 +1,12 @@
 # Tests
 
-`pixi run test` runs `tests/testthat/test-tandem.R`. It checks:
+```sh
+pixi run test     # tests/testthat/test-tandem.R
+```
+
+## Suite
+
+`tests/testthat/test-tandem.R` checks:
 
 - Every specification vector (`vectors.json`) and the stream dumps in `tests/testthat/data`.
 - Bounded integers, normals, and exponentials against tandem-c fixtures, built by

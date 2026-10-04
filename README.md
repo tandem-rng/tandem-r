@@ -3,6 +3,7 @@
 # tandem-r
 
 [![CI](https://github.com/tandem-rng/tandem-r/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tandem-rng/tandem-r/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-tandem--rng.github.io-7fb3ee.svg)](https://tandem-rng.github.io/tandem-r/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
 
 R package `tandemrng` for [Tandem8x32](https://github.com/tandem-rng/spec), a noncryptographic
@@ -26,8 +27,8 @@ z <- tandem_rnorm(worker, 10)        # standard normals by the ziggurat
 RNGkind("user-supplied")             # Tandem as the base R generator
 ```
 
-See [API](docs/api.md), [tests](docs/tests.md) and [speed](docs/speed.md).
+See [API](docs/api.md), [design](docs/design.md), [tests](docs/tests.md) and [speed](docs/speed.md).
 
 Portions of the code were generated with the assistance of LLMs.
 
-[Documentation](docs/index.md) · [Apache 2.0 license](LICENSE)
+[Documentation](https://tandem-rng.github.io/tandem-r/) · [Apache 2.0 license](LICENSE)

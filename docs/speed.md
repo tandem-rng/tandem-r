@@ -1,5 +1,9 @@
 # Speed
 
+`pixi run bench` produces the figures.
+
+## CPU
+
 Apple M4, one thread, `pixi run bench`, 2^22 doubles, minimum of five runs. Normal and
 exponential rows count 8 bytes per value.
 

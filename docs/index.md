@@ -1,6 +1,11 @@
-# tandem-r documentation
+# tandem-r
+
+R package `tandemrng` for Tandem8x32. It wraps a vendored tandem-c and produces the stream of
+the [specification](https://github.com/tandem-rng/spec/blob/main/SPEC.md) bit for bit, and it
+can serve as the base R generator.
 
 - [API](api.md): the functions, the base R hook, serialization and parallel use.
+- [Design](design.md): the bounded integer, normal and exponential contracts.
 - [Tests](tests.md): what the suite checks.
 - [Speed](speed.md): fill and base R figures on the Apple M4.
 

@@ -1,26 +1,6 @@
 # API
 
-- `tandem(seed)`, `tandem_from_key()`: a generator. Seeds, positions, indices, and purposes are
-  doubles below 2^53, or decimal strings for the full range. `tandem()` with no seed reads
-  `/dev/urandom`.
-- `tandem_runif`, `tandem_rsingle`, `tandem_rbool`: Float64, Float32, and bit draws.
-- `tandem_rbits(rng, n, bits)`: 8, 16, 32, or 64-bit words. 64-bit words are `bit64::integer64`
-  if `bit64` is installed, else 16-digit hex strings.
-- `tandem_below`, `tandem_sample_int`: bounded integers on `0..max-1` and `1..max`.
-- `tandem_rnorm`, `tandem_rexp`: ziggurat normals and `-log(1 - u) / rate` exponentials.
-- `tandem_split`, `tandem_fork`, `tandem_sub`: child streams.
-- `tandem_at`: elements of the next fill, without drawing, for `"u32"`, `"u64"`, `"f32"`, `"f64"`.
-- `tandem_key`, `tandem_position`, `tandem_set_position`, `tandem_chunk_length`, `tandem_state`,
-  `tandem_restore`: transport form.
-- `RNGkind("user-supplied")`: Tandem as the base R generator. `.Random.seed` holds its state, so
-  `set.seed()` and restoring the seed repeat the draws. `rexp()` still uses R's algorithm.
-- Serialization: a generator survives `saveRDS()`, `serialize()`, and parallel workers at its
-  position. Copies are independent, so give each worker its own `tandem_split()`.
-- Parallel use: element `i` of a fill is draw `i`, so ranks or workers that start at their first
-  element, or draw from `split(task)`, reproduce a serial run. See
-  [Appendix B](https://github.com/tandem-rng/spec/blob/main/SPEC.md#appendix-b-parallel-decomposition-non-normative).
-
-## Examples
+## Use
 
 ```r
 library(tandemrng)
@@ -52,6 +32,25 @@ a <- runif(3)
 identical(runif(3), a)               # TRUE: restoring the seed repeats the draws
 ```
 
+## Reference
+
+- `tandem(seed)`, `tandem_from_key()`: a generator. Seeds, positions, indices, and purposes are
+  doubles below 2^53, or decimal strings for the full range. `tandem()` with no seed reads
+  `/dev/urandom`.
+- `tandem_runif`, `tandem_rsingle`, `tandem_rbool`: Float64, Float32, and bit draws.
+- `tandem_rbits(rng, n, bits)`: 8, 16, 32, or 64-bit words. 64-bit words are `bit64::integer64`
+  if `bit64` is installed, else 16-digit hex strings.
+- `tandem_below`, `tandem_sample_int`: bounded integers on `0..max-1` and `1..max`.
+- `tandem_rnorm`, `tandem_rexp`: ziggurat normals and `-log(1 - u) / rate` exponentials.
+- `tandem_split`, `tandem_fork`, `tandem_sub`: child streams.
+- `tandem_at`: elements of the next fill, without drawing, for `"u32"`, `"u64"`, `"f32"`, `"f64"`.
+- `tandem_key`, `tandem_position`, `tandem_set_position`, `tandem_chunk_length`, `tandem_state`,
+  `tandem_restore`: transport form.
+- `RNGkind("user-supplied")`: Tandem as the base R generator. `.Random.seed` holds its state, so
+  `set.seed()` and restoring the seed repeat the draws. `rexp()` still uses R's algorithm.
+- Serialization: a generator survives `saveRDS()`, `serialize()`, and parallel workers at its
+  position. Copies are independent, so give each worker its own `tandem_split()`.
+
 Seeds, positions, indices and purposes are doubles below 2^53, or strings of decimal digits
 for the full 128-bit or 64-bit range. A key is four numbers below 2^32 or 32 hex digits with
 word 0 first. `tandem()` with no seed takes 128 bits from `/dev/urandom`.
@@ -81,26 +80,7 @@ count from 0, as in the specification. `i` may be a vector.
 integers, normals and exponentials from a generator, not from the base R hook. They follow Appendix A of the specification, which is not
 normative, through the C library's fills, so they equal tandem-c's values bit for bit. `tandem_below()` returns the C fill,
 uniform on `0..(max - 1)`, and `tandem_sample_int()` adds 1, so it is uniform on `1..max` like
-`sample.int(max, n, replace = TRUE)`.
-Element `i` maps stream word `i` by Lemire's multiply-and-reject method, and a rejected word
-retries on a fallback generator derived by the global draw index, the aligned start position over
-the word width plus `i`, so a fill uses exactly `n` words and a fill cut at any element equals
-the whole fill. It reads 32-bit words, or 64-bit words for `max` above `2^32`. Normals use the
-1024-layer ziggurat: element `i` comes from the 64-bit draw `i`, a draw outside the inner
-rectangles continues on a fallback generator keyed by its global draw index, and a fill cut at
-any element equals the whole fill.
-
-Exponentials follow [Appendix A](https://github.com/tandem-rng/spec/blob/main/SPEC.md) of the
-specification: element `i` is `-log(1 - u) / rate` for the Float64 draw `u` number `i`, one draw
-each, so a fill is random access and uses exactly `n` draws. At `rate = 1` the values are bit
-identical across ports. Base R has no user-supplied hook for exponentials, so `rexp()` after
-`RNGkind("user-supplied")` runs R's own algorithm on the Tandem uniforms and does not return them.
-
-Parallel use: element `i` of a fill is draw `i`, so ranks, threads or devices that start at the
-position of their first element, or draw from `split(task)`, reproduce a serial run for any
-decomposition, as
-[Appendix B](https://github.com/tandem-rng/spec/blob/main/SPEC.md#appendix-b-parallel-decomposition-non-normative)
-of the specification shows.
+`sample.int(max, n, replace = TRUE)`. [Design](design.md) gives the contracts.
 
 ## Serialization
 
@@ -119,3 +99,11 @@ n)` advancing `rng`. Copies made by serialization are independent of each other 
 original: two workers that receive the same generator draw the same values, so give each its
 own with `tandem_split()`. `tandem_state()` and `tandem_restore()` convert to and from a plain
 list for use outside R's own formats.
+
+## Parallel use
+
+Element `i` of a fill is draw `i`, so ranks, threads or devices that start at the
+position of their first element, or draw from `split(task)`, reproduce a serial run for any
+decomposition, as
+[Appendix B](https://github.com/tandem-rng/spec/blob/main/SPEC.md#appendix-b-parallel-decomposition-non-normative)
+of the specification shows.
