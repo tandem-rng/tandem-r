@@ -165,3 +165,40 @@ test_that("the base R hook draws from tandem(seed)", {
   set.seed(2147483647)
   expect_identical(runif(2), tandem_runif(tandem(2147483647), 2))
 })
+
+test_that("the base R hook state lives in .Random.seed", {
+  old <- RNGkind("user-supplied")
+  on.exit(RNGkind(old[1]), add = TRUE)
+  seed <- function() get(".Random.seed", globalenv())
+  restore <- function(s) assign(".Random.seed", s, globalenv())
+  set.seed(42)
+  # Key, position, K and the draws used: 8 words after the kind code.
+  expect_length(seed(), 9)
+  words <- hex_num(substring(tandem_key(tandem(42)), c(1, 9, 17, 25), c(8, 16, 24, 32)))
+  expect_identical(seed()[2:5] %% 2^32, words)
+  # Restoring repeats the draws, including across the 1024-draw buffer edge.
+  for (used in c(0, 3, 1000, 1023, 1500)) {
+    set.seed(42)
+    runif(used)
+    s <- seed()
+    a <- runif(2500)
+    restore(s)
+    expect_identical(runif(2500), a)
+  }
+  # A restored state equals the unbroken stream.
+  set.seed(42)
+  whole <- runif(3000)
+  set.seed(42)
+  runif(1500)
+  s <- seed()
+  runif(10)
+  restore(s)
+  expect_identical(runif(1500), whole[1501:3000])
+  # A saved state restores after set.seed has replaced it.
+  set.seed(1)
+  s <- seed()
+  a <- runif(5)
+  set.seed(7)
+  restore(s)
+  expect_identical(runif(5), a)
+})

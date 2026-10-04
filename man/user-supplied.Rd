@@ -7,7 +7,9 @@
 After \code{RNGkind("user-supplied")}, \code{runif()} and every function built on it draw from a
 Tandem8x32 generator held by the package. \code{set.seed(s)} then gives the generator
 \code{tandem(s)}, so \code{runif(n)} returns the specification's Float64 draws of \code{tandem(s)} from
-position 0. The state of this generator is not saved in \code{.Random.seed}.
+position 0. The state of the generator is in \code{.Random.seed}: the key, the position of the
+first draw in the hook's buffer of 1024 draws, \code{K} and the number of draws used. Saving and
+restoring \code{.Random.seed} therefore repeats the stream.
 }
 \examples{
 old <- RNGkind("user-supplied")

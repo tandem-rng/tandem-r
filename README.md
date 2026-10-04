@@ -27,11 +27,21 @@ saveRDS(rng, "rng.rds")              # a generator survives saveRDS and parallel
 RNGkind("user-supplied")             # Tandem as the base R generator
 set.seed(42)
 runif(3)                             # equals tandem_runif(tandem(42), 3)
+saved <- .Random.seed                # the hook's state is in .Random.seed
+a <- runif(3)
+.Random.seed <- saved
+identical(runif(3), a)               # TRUE: restoring the seed repeats the draws
 ```
 
 Seeds, positions, indices and purposes are doubles below 2^53, or strings of decimal digits
 for the full 128-bit or 64-bit range. A key is four numbers below 2^32 or 32 hex digits with
 word 0 first. `tandem()` with no seed takes 128 bits from `/dev/urandom`.
+
+With the hook active, `.Random.seed` holds eight integers after the kind code: the key, the
+position of the first draw in the hook's buffer of 1024 draws, `K`, and the number of draws
+used from that buffer. R copies them in and out around each call, so saving and restoring
+`.Random.seed` (or `set.seed()`) restores the stream exactly. The hook checks per draw that
+the state still matches its buffer, which costs a little speed, see below.
 
 `tandem_rbits()` supports 8, 16 and 32 bits, returned as doubles because 32-bit words do not
 fit R integers. 64-bit words have no exact R type and are not provided.
@@ -69,7 +79,8 @@ runs the tests and `pixi run check` runs `R CMD check --as-cran`.
 
 `tests/testthat/test-tandem.R` checks every vector of the specification
 (`tests/testthat/vectors.json`, a copy of the spec repository's file), compares fills with
-reference stream dumps in `tests/testthat/data`, and checks the base R hook. It also checks
+reference stream dumps in `tests/testthat/data`, and checks the base R hook, including that
+saving `.Random.seed`, drawing, restoring and redrawing repeats, across the buffer edge. It also checks
 that generators survive `saveRDS()`/`readRDS()`, `serialize()`, a `callr` child process and
 forked `parallel::mclapply()` workers at their current position. CI fails when
 the vendored C sources in `src/` or the vectors drift from upstream. `tools/sync_c.sh` refreshes the C sources.

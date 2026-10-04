@@ -167,7 +167,9 @@ tandem_fork <- function(rng, n) .Call(R_tandem_fork, rng, as.double(n))
 #' After `RNGkind("user-supplied")`, `runif()` and every function built on it draw from a
 #' Tandem8x32 generator held by the package. `set.seed(s)` then gives the generator
 #' `tandem(s)`, so `runif(n)` returns the specification's Float64 draws of `tandem(s)` from
-#' position 0. The state of this generator is not saved in `.Random.seed`.
+#' position 0. The state of the generator is in `.Random.seed`: the key, the position of the
+#' first draw in the hook's buffer of 1024 draws, `K` and the number of draws used. Saving and
+#' restoring `.Random.seed` therefore repeats the stream.
 #'
 #' @examples
 #' old <- RNGkind("user-supplied")

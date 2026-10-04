@@ -322,29 +322,74 @@ SEXP R_tandem_fork(SEXP rng, SEXP n) {
 
 /* ---- Base R hook: RNGkind("user-supplied") ---------------------------------------------- */
 
-static tandem_rng user_rng;
+/* R asks the hook for one double at a time. Filling a buffer of rows amortises the
+ * generator's per-call cost; the values and their order are those of tandem_next_f64.
+ *
+ * R copies the array behind user_unif_seedloc() to and from .Random.seed around every
+ * call into the generator, so that array is the authoritative state:
+ *   key[4], position of the first draw in the buffer (lo, hi), K, draws already used.
+ * The buffer and the generator behind it are caches of that state. user_shadow is the
+ * key, position and K they were built for; a mismatch means R restored another .Random.seed.
+ * The count of draws used does not matter to the buffer, so the draw path does not copy it. */
+#define USER_BUF 1024
+#define USER_NSEED 8
+static Int32 user_seed[USER_NSEED], user_shadow[7];
+static int user_valid;
+static double user_buf[USER_BUF];
+
+static void user_rebuild(void) {
+    uint32_t key[4], K = user_seed[6];
+    uint64_t pos = (uint64_t)user_seed[4] | (uint64_t)user_seed[5] << 32;
+    if (K < 1 || K > 65536 || (K & (K - 1u)) || user_seed[7] >= USER_BUF)
+        error("'.Random.seed' does not hold a valid Tandem8x32 state");
+    for (int w = 0; w < 4; w++) key[w] = user_seed[w];
+    {
+        tandem_rng g = tandem_from_key(key, pos, K);
+        tandem_fill_f64(&g, user_buf, USER_BUF);
+    }
+    memcpy(user_shadow, user_seed, 7 * sizeof(Int32));
+    user_valid = 1;
+}
+
+static int user_nseed = USER_NSEED;
+
+int *user_unif_nseed(void) { return &user_nseed; }
+
+int *user_unif_seedloc(void) { return (int *)user_seed; }
 
 /* set.seed(s) hands the hook 50 rounds of s <- 69069 s + 1 (mod 2^32). Undo them, so that
  * set.seed(s) is the generator tandem(s) for every s in the Int32 range. */
-/* R asks the hook for one double at a time. Filling a buffer of rows amortises the
- * generator's per-call cost; the values and their order are those of tandem_next_f64. */
-#define USER_BUF 1024
-static double user_buf[USER_BUF];
-static size_t user_left;
-
 void user_unif_init(Int32 seed) {
     const uint32_t inv = 0xa5e2a705u; /* 69069^-1 mod 2^32 */
+    tandem_rng g;
     for (int j = 0; j < 50; j++) seed = (seed - 1u) * inv;
-    user_rng = tandem_seed(seed, 0, TANDEM_DEFAULT_K);
-    user_left = 0;
+    g = tandem_seed(seed, 0, TANDEM_DEFAULT_K);
+    for (int w = 0; w < 4; w++) user_seed[w] = g.key[w];
+    user_seed[4] = user_seed[5] = user_seed[7] = 0;
+    user_seed[6] = TANDEM_DEFAULT_K;
+    user_valid = 0;
+}
+
+static int user_stale(void) {
+    Int32 diff = 0;
+    for (int i = 0; i < 7; i++) diff |= user_seed[i] ^ user_shadow[i];
+    return diff != 0;
 }
 
 double *user_unif_rand(void) {
-    if (user_left == 0) {
-        tandem_fill_f64(&user_rng, user_buf, USER_BUF);
-        user_left = USER_BUF;
+    Int32 used;
+    if (!user_valid || user_stale()) user_rebuild();
+    used = user_seed[7]++;
+    if (user_seed[7] == USER_BUF) {
+        /* The buffer is spent: move the state to the start of the next one. The next call
+         * refills user_buf, so the draw returned here stays valid until then. */
+        uint64_t pos = ((uint64_t)user_seed[4] | (uint64_t)user_seed[5] << 32) + 64u * USER_BUF;
+        user_seed[4] = (Int32)pos;
+        user_seed[5] = (Int32)(pos >> 32);
+        user_seed[7] = 0;
+        user_valid = 0;
     }
-    return &user_buf[USER_BUF - user_left--];
+    return &user_buf[used];
 }
 
 /* ---- Registration ----------------------------------------------------------------------- */
@@ -369,6 +414,8 @@ static const R_CallMethodDef calls[] = {
 static const R_CMethodDef cmethods[] = {
     {"user_unif_rand", (DL_FUNC)&user_unif_rand, 0},
     {"user_unif_init", (DL_FUNC)&user_unif_init, 1},
+    {"user_unif_nseed", (DL_FUNC)&user_unif_nseed, 0},
+    {"user_unif_seedloc", (DL_FUNC)&user_unif_seedloc, 0},
     {NULL, NULL, 0}};
 
 void R_init_tandemrng(DllInfo *dll) {
