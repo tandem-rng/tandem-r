@@ -181,9 +181,12 @@ tandem_at <- function(rng, type, i) {
 #' 32-bit words when `max` is below `2^32` and 64-bit words above. The result is an
 #' integer vector when `max <= 2^31` and a double vector otherwise.
 #'
-#' `tandem_rnorm()` returns `n` standard normals by the Box-Muller transform. Normal `i` uses the
-#' Float64 draws `2i` and `2i + 1` of the generator as `u` and `v`, with `u` mapped to `(0, 1]`,
-#' and returns `sqrt(-2 log u) cos(2 pi v)`. The sine half of each pair is not used.
+#' `tandem_rnorm()` returns `n` standard normals by the Box-Muller transform. Pair `j`, elements
+#' `2j` and `2j + 1`, comes from the Float64 draws `2j` and `2j + 1` as `u` and `v`, with `u`
+#' mapped to `(0, 1]`: `r = sqrt(-2 log u)`, the cosine half `r cos(2 pi v)` first and the sine
+#' half `r sin(2 pi v)` second. An odd `n` uses the cosine half of its last pair and still
+#' advances past both draws, so a fill consumes `2 ceiling(n / 2)` draws. Values agree across
+#' ports to about 1e-12 relative, since libm functions differ in the last places.
 #'
 #' @param rng A `tandem_rng` object.
 #' @param n The number of values.

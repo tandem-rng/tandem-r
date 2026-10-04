@@ -64,8 +64,9 @@ port's `core.hpp`, so every port returns the same values. Integers are uniform o
 Element `i` maps stream word `i` by Lemire's multiply-and-reject method, and a rejected word
 retries on a fallback generator derived by index `i`, so a fill uses exactly `n` words. It reads
 32-bit words, or 64-bit words for `max`
-above `2^32 - 1`, and counts from 0 where R's `sample.int()` counts from 1. Normal `i` is the
-Box-Muller cosine branch of the Float64 draws `2i` and `2i + 1`.
+above `2^32 - 1`, and counts from 0 where R's `sample.int()` counts from 1. Normals come in
+Box-Muller pairs: elements `2j` and `2j + 1` are the cosine and sine halves from the Float64
+draws `2j` and `2j + 1`, and an odd count still consumes both draws of its last pair.
 
 ## Serialization
 
@@ -108,7 +109,7 @@ with `k1234_K32_u64.bin` in both result types. Random access is checked against 
 matching fill at several positions and chunk lengths. Bounded integers and normals are
 compared with tandem-c's fixtures, generated from `core.hpp` and converted to
 `tests/testthat/data/cross_bounded.json` by `tools/gen_cross_fixtures.R`: integer ranges that reject
-about half of the draws, the stream position after them, and 64 normals. CI fails when
+about half of the draws, the stream position after them, and 128 normals. CI fails when
 the vendored C sources in `src/` or the vectors drift from upstream. `tools/sync_c.sh` refreshes the C sources.
 
 ## Speed

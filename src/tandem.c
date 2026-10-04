@@ -655,49 +655,92 @@ void tandem_fill_u64_below(tandem_rng *rng, uint64_t *out, size_t len, uint64_t 
 
 /* ---- Public: normals --------------------------------------------------------------------- */
 
-static inline double box_muller(double a, double b) {
-    return sqrt(-2.0 * log(1.0 - a)) * cos(6.283185307179586 * b);
+/* Compilers may turn cos and sin of one angle into a combined sincos call whose last bit differs
+ * from the separate calls, and do so in some inlined copies only. One out-of-line body keeps
+ * the scalar draws and the fills bit identical. */
+#if defined(__GNUC__) || defined(__clang__)
+#define NOINLINE __attribute__((noinline))
+#else
+#define NOINLINE
+#endif
+
+/* One radius and angle give two normals, the cos half first. The f32 radius is float. */
+NOINLINE static void box_muller2(double a, double b, double out[2]) {
+    double r = sqrt(-2.0 * log(1.0 - a)), t = 6.283185307179586 * b;
+    out[0] = r * cos(t);
+    out[1] = r * sin(t);
+}
+
+/* The angle goes through double: a float angle 2 pi b is off by up to 2 pi b 2^-24, which the
+ * device's sincospif does not suffer, and tandem-cuda's host path does the same. */
+NOINLINE static void box_muller2_f32(float a, float b, float out[2]) {
+    float r = sqrtf(-2.0f * logf(1.0f - a));
+    double t = 6.283185307179586 * (double)b;
+    out[0] = r * (float)cos(t);
+    out[1] = r * (float)sin(t);
+}
+
+void tandem_normal2_f64(tandem_rng *rng, double out[2]) {
+    double a = tandem_next_f64(rng);
+    box_muller2(a, tandem_next_f64(rng), out);
+}
+
+void tandem_normal2_f32(tandem_rng *rng, float out[2]) {
+    float a = tandem_next_f32(rng);
+    box_muller2_f32(a, tandem_next_f32(rng), out);
 }
 
 double tandem_normal_f64(tandem_rng *rng) {
-    double a = tandem_next_f64(rng);
-    return box_muller(a, tandem_next_f64(rng));
-}
-
-/* Entirely in float, as Rng::normalf of tandem-cuda: no double intermediate. */
-static inline float box_muller_f32(float a, float b) {
-    return sqrtf(-2.0f * logf(1.0f - a)) * cosf(2.0f * 3.14159265358979323846f * b);
+    double z[2];
+    tandem_normal2_f64(rng, z);
+    return z[0];
 }
 
 float tandem_normal_f32(tandem_rng *rng) {
-    float a = tandem_next_f32(rng);
-    return box_muller_f32(a, tandem_next_f32(rng));
+    float z[2];
+    tandem_normal2_f32(rng, z);
+    return z[0];
 }
 
-/* The uniforms of a fill come from tandem_fill_f64 or tandem_fill_f32 in blocks, which is the
- * same stream as scalar draws because every draw is aligned to its width. */
+/* Pair j of a fill is elements 2j and 2j + 1 from uniforms 2j and 2j + 1 of the plain float
+ * fill, so an odd n keeps the cos half of its last pair and still consumes both uniforms. The
+ * uniforms come in blocks, which is the same stream as scalar draws because every draw is
+ * aligned to its width. */
 #define NORMAL_BLOCK 256u
 
 void tandem_fill_normal_f64(tandem_rng *rng, double *out, size_t n) {
     double u[2u * NORMAL_BLOCK];
-    while (n) {
-        size_t m = n < NORMAL_BLOCK ? n : NORMAL_BLOCK;
+    size_t pairs = n / 2u + n % 2u;
+    while (pairs) {
+        size_t m = pairs < NORMAL_BLOCK ? pairs : NORMAL_BLOCK;
         tandem_fill_f64(rng, u, 2u * m);
-        for (size_t i = 0; i < m; i++) out[i] = box_muller(u[2u * i], u[2u * i + 1u]);
-        out += m;
-        n -= m;
+        for (size_t j = 0; j < m; j++) {
+            double z[2];
+            box_muller2(u[2u * j], u[2u * j + 1u], z);
+            out[0] = z[0];
+            if (n == 1u) break;
+            out[1] = z[1];
+            out += 2, n -= 2u;
+        }
+        pairs -= m;
     }
 }
 
 void tandem_fill_normal_f32(tandem_rng *rng, float *out, size_t n) {
     float u[2u * NORMAL_BLOCK];
-    while (n) {
-        size_t m = n < NORMAL_BLOCK ? n : NORMAL_BLOCK;
+    size_t pairs = n / 2u + n % 2u;
+    while (pairs) {
+        size_t m = pairs < NORMAL_BLOCK ? pairs : NORMAL_BLOCK;
         tandem_fill_f32(rng, u, 2u * m);
-        for (size_t i = 0; i < m; i++)
-            out[i] = box_muller_f32(u[2u * i], u[2u * i + 1u]);
-        out += m;
-        n -= m;
+        for (size_t j = 0; j < m; j++) {
+            float z[2];
+            box_muller2_f32(u[2u * j], u[2u * j + 1u], z);
+            out[0] = z[0];
+            if (n == 1u) break;
+            out[1] = z[1];
+            out += 2, n -= 2u;
+        }
+        pairs -= m;
     }
 }
 

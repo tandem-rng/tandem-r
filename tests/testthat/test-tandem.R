@@ -296,12 +296,21 @@ test_that("bounded fills match the CUDA core", {
 
 test_that("normals match the CUDA core", {
   rng <- after_bit()
-  expect_equal(tandem_rnorm(rng, 64), unlist(cross$normal), tolerance = 1e-13)
+  expect_equal(tandem_rnorm(rng, 128), unlist(cross$normal), tolerance = 1e-12)
   expect_identical(tandem_position(rng), as.numeric(cross$normal_end_pos))
 })
 
-test_that("normal i is Box-Muller of uniform draws 2i and 2i + 1", {
+test_that("an odd count of normals still consumes whole pairs", {
+  rng <- after_bit()
+  expect_equal(tandem_rnorm(rng, 127), unlist(cross$normal)[1:127], tolerance = 1e-12)
+  expect_identical(tandem_position(rng), as.numeric(cross$normal_end_pos))
+})
+
+test_that("pair j of normals is Box-Muller of uniform draws 2j and 2j + 1", {
   u <- tandem_runif(tandem(42), 20)
-  z <- sqrt(-2 * log(1 - u[c(TRUE, FALSE)])) * cos(2 * pi * u[c(FALSE, TRUE)])
-  expect_equal(tandem_rnorm(tandem(42), 10), z, tolerance = 1e-14)
+  a <- u[c(TRUE, FALSE)]
+  b <- u[c(FALSE, TRUE)]
+  r <- sqrt(-2 * log(1 - a))
+  z <- as.vector(rbind(r * cos(2 * pi * b), r * sin(2 * pi * b)))
+  expect_equal(tandem_rnorm(tandem(42), 20), z, tolerance = 1e-12)
 })

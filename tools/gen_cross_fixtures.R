@@ -15,7 +15,7 @@ cases <- function(text, name) {
 }
 
 normals <- function(text, name) {
-  body <- sub("\\n\\};.*$", "", sub(paste0(".*", name, "\\[CROSS_NORMAL_COUNT\\] = \\{"), "", text))
+  body <- sub("\\n\\};.*$", "", sub(paste0(".*", name, "\\[(2 \\* )?CROSS_NORMAL_COUNT\\] = \\{"), "", text))
   as.numeric(sub("f$", "", strsplit(gsub("\\s+", "", body), ",")[[1]]))
 }
 

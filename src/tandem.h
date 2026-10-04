@@ -71,11 +71,15 @@ void tandem_next_c64(tandem_rng *rng, double out[2]);
 uint32_t tandem_u32_below(tandem_rng *rng, uint32_t n);
 uint64_t tandem_u64_below(tandem_rng *rng, uint64_t n);
 
-/* Standard normal by Box-Muller from two tandem_next_f64 draws, u mapped to (0, 1]:
- * sqrt(-2 ln u) cos(2 pi v). It matches Rng::normal of tandem-cuda and is not part of the
- * specification. The f32 version draws two tandem_next_f32 values, 64 bits, and computes in float
- * as Rng::normalf does. Float libm functions differ between platforms, so f32 normals agree
- * across ports to a few ulps, not bit for bit. Link with -lm. */
+/* Standard normals by Box-Muller from two uniforms a and b: r = sqrt(-2 ln(1 - a)) and the pair
+ * (r cos 2 pi b, r sin 2 pi b). They match Rng::normal, normalf and the pair forms of
+ * tandem-cuda and are not part of the specification. tandem_normal_* returns the cos half and
+ * consumes two uniforms, tandem_normal2_* returns both halves from the same two uniforms, cos
+ * first. The f32 versions draw f32 uniforms, 64 bits, and compute in float. Float libm functions
+ * differ between platforms, so f32 normals agree across ports to a few ulps, not bit for bit.
+ * Link with -lm. */
+void tandem_normal2_f64(tandem_rng *rng, double out[2]);
+void tandem_normal2_f32(tandem_rng *rng, float out[2]);
 double tandem_normal_f64(tandem_rng *rng);
 float tandem_normal_f32(tandem_rng *rng);
 
@@ -102,7 +106,9 @@ void tandem_fill_c64(tandem_rng *rng, double *out, size_t n);
 void tandem_fill_u32_below(tandem_rng *rng, uint32_t *out, size_t len, uint32_t n);
 void tandem_fill_u64_below(tandem_rng *rng, uint64_t *out, size_t len, uint64_t n);
 
-/* n normals, the same values as n calls of tandem_normal_f64 or tandem_normal_f32. */
+/* n normals as the flattened sequence of tandem_normal2 pairs: pair j is elements 2j and 2j + 1
+ * from uniforms 2j and 2j + 1. An odd n keeps the cos half of its last pair and still consumes
+ * both uniforms, 2 * ceil(n / 2) in all. */
 void tandem_fill_normal_f64(tandem_rng *rng, double *out, size_t n);
 void tandem_fill_normal_f32(tandem_rng *rng, float *out, size_t n);
 
