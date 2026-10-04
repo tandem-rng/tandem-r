@@ -20,6 +20,9 @@ b <- tandem_rbool(rng, 10)           # single stream bits
 worker <- tandem_split(rng, 7)       # by index, from the key alone
 kids <- tandem_fork(rng, 4)          # from the current block, parent moves on
 tandem_key(rng); tandem_position(rng); tandem_chunk_length(rng)
+s <- tandem_state(rng)               # plain list: key hex, position string, K
+rng2 <- tandem_restore(s)            # same stream from the same position
+saveRDS(rng, "rng.rds")              # a generator survives saveRDS and parallel workers
 
 RNGkind("user-supplied")             # Tandem as the base R generator
 set.seed(42)
@@ -32,6 +35,24 @@ word 0 first. `tandem()` with no seed takes 128 bits from `/dev/urandom`.
 
 `tandem_rbits()` supports 8, 16 and 32 bits, returned as doubles because 32-bit words do not
 fit R integers. 64-bit words have no exact R type and are not provided.
+
+## Serialization
+
+A generator is an external pointer, and R drops the address of a pointer on `saveRDS()`,
+`serialize()` and transfer to a worker. The pointer keeps a 28-byte tag with the transport
+form (key, position, `K`), which serialization preserves. Each call that moves the position
+writes the new position into the tag, an 8-byte store. A deserialized generator finds its
+address null on first use and rebuilds itself from the tag, at the position it had when it
+was serialized.
+
+This keeps the generator an object that updates in place, as every call in the API expects,
+and adds no cost to a draw beyond that store. The alternative, a plain list that holds the
+state and rebuilds a pointer on demand, would need copy-on-modify semantics for the position
+and a way to hand the advanced position back to the caller, which breaks `tandem_runif(rng,
+n)` advancing `rng`. Copies made by serialization are independent of each other and of the
+original: two workers that receive the same generator draw the same values, so give each its
+own with `tandem_split()`. `tandem_state()` and `tandem_restore()` convert to and from a plain
+list for use outside R's own formats.
 
 ## Install
 
@@ -48,7 +69,9 @@ runs the tests and `pixi run check` runs `R CMD check --as-cran`.
 
 `tests/testthat/test-tandem.R` checks every vector of the specification
 (`tests/testthat/vectors.json`, a copy of the spec repository's file), compares fills with
-reference stream dumps in `tests/testthat/data`, and checks the base R hook. CI fails when
+reference stream dumps in `tests/testthat/data`, and checks the base R hook. It also checks
+that generators survive `saveRDS()`/`readRDS()`, `serialize()`, a `callr` child process and
+forked `parallel::mclapply()` workers at their current position. CI fails when
 the vendored C sources in `src/` or the vectors drift from upstream. `tools/sync_c.sh` refreshes the C sources.
 
 ## Speed

@@ -87,6 +87,61 @@ test_that("positions align to the width and fills can start anywhere", {
   expect_identical(tandem_position(big), "18446744073709551000")
 })
 
+test_that("state round-trips through a plain list", {
+  rng <- tandem(42, 8)
+  tandem_runif(rng, 5)
+  s <- tandem_state(rng)
+  expect_identical(s, list(key = tandem_key(rng), position = "320", K = 8L))
+  expect_identical(tandem_runif(tandem_restore(s), 4), tandem_runif(rng, 4))
+  big <- tandem_from_key(key, "18446744073709551000", K)
+  expect_identical(tandem_state(big)$position, "18446744073709551000")
+  expect_identical(tandem_position(tandem_restore(tandem_state(big))), "18446744073709551000")
+})
+
+test_that("a generator survives serialization at its current position", {
+  rng <- tandem(42)
+  tandem_runif(rng, 5)
+  path <- tempfile(fileext = ".rds")
+  on.exit(unlink(path), add = TRUE)
+  saveRDS(rng, path)
+  tandem_runif(rng, 1)
+  back <- readRDS(path)
+  expect_s3_class(back, "tandem_rng")
+  expect_identical(tandem_position(back), 320)
+  expect_identical(tandem_runif(back, 3), tandem_runif(tandem_from_key(tandem_key(rng), 320), 3))
+  # The saved copy and the live generator are independent.
+  expect_identical(tandem_position(rng), 384)
+  expect_identical(tandem_position(back), 512)
+  both <- unserialize(serialize(list(a = rng, b = rng), NULL))
+  tandem_runif(both$a, 2)
+  expect_identical(tandem_position(both$b), 512)
+})
+
+test_that("generators cross process boundaries", {
+  skip_if_not_installed("callr")
+  skip_if_not(nzchar(system.file(package = "tandemrng")), "tandemrng is not installed")
+  rng <- tandem(42)
+  tandem_runif(rng, 5)
+  got <- callr::r(function(g) tandemrng::tandem_runif(g, 3), args = list(g = rng))
+  expect_identical(got, tandem_runif(tandem_from_key(tandem_key(rng), 320), 3))
+})
+
+test_that("generators come back from forked workers with their advanced position", {
+  skip_on_os("windows")
+  skip_if_not_installed("parallel")
+  rng <- tandem(7)
+  kids <- parallel::mclapply(0:1, function(i) {
+    g <- tandem_split(rng, i)
+    tandem_runif(g, 2)
+    g
+  }, mc.cores = 2)
+  for (i in 0:1) {
+    expect_identical(tandem_position(kids[[i + 1]]), 128)
+    expect_identical(tandem_runif(kids[[i + 1]], 1),
+                     tandem_runif(tandem_split(rng, i), 3)[3])
+  }
+})
+
 test_that("arguments are checked", {
   expect_error(tandem(-1), "seed must be")
   expect_error(tandem(1.5), "seed must be")

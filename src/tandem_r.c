@@ -101,6 +101,23 @@ static size_t parse_n(SEXP x) {
 
 /* ---- Generator objects ------------------------------------------------------------------ */
 
+/* saveRDS, serialize and parallel workers keep an external pointer's tag but null its address.
+ * The tag holds the transport form as bytes, key then position then K, all little-endian. The
+ * position is refreshed after every call that moves it, and unwrap() rebuilds a nulled
+ * generator from the tag on first use. */
+#define STATE_BYTES 28
+#define POS_OFFSET 16
+
+static void put_le(unsigned char *b, uint64_t v, int bytes) {
+    for (int i = 0; i < bytes; i++) b[i] = (unsigned char)(v >> (8 * i));
+}
+
+static uint64_t get_le(const unsigned char *b, int bytes) {
+    uint64_t v = 0;
+    for (int i = 0; i < bytes; i++) v |= (uint64_t)b[i] << (8 * i);
+    return v;
+}
+
 static void finalize(SEXP ptr) {
     tandem_rng *rng = R_ExternalPtrAddr(ptr);
     if (rng) {
@@ -109,25 +126,50 @@ static void finalize(SEXP ptr) {
     }
 }
 
-static SEXP wrap(tandem_rng rng) {
+static void attach(SEXP ptr, tandem_rng rng) {
     tandem_rng *p = R_Calloc(1, tandem_rng);
-    SEXP ptr, cls;
     *p = rng;
-    ptr = PROTECT(R_MakeExternalPtr(p, R_NilValue, R_NilValue));
+    R_SetExternalPtrAddr(ptr, p);
     R_RegisterCFinalizerEx(ptr, finalize, TRUE);
+}
+
+static SEXP wrap(tandem_rng rng) {
+    SEXP ptr, tag, cls;
+    unsigned char *b;
+    tag = PROTECT(allocVector(RAWSXP, STATE_BYTES));
+    b = RAW(tag);
+    for (int w = 0; w < 4; w++) put_le(b + 4 * w, rng.key[w], 4);
+    put_le(b + POS_OFFSET, rng.pos, 8);
+    put_le(b + POS_OFFSET + 8, rng.K, 4);
+    ptr = PROTECT(R_MakeExternalPtr(NULL, tag, R_NilValue));
+    attach(ptr, rng);
     cls = PROTECT(mkString("tandem_rng"));
     setAttrib(ptr, R_ClassSymbol, cls);
-    UNPROTECT(2);
+    UNPROTECT(3);
     return ptr;
 }
 
 static tandem_rng *unwrap(SEXP ptr) {
     tandem_rng *rng;
+    SEXP tag;
     if (TYPEOF(ptr) != EXTPTRSXP || !inherits(ptr, "tandem_rng"))
         error("expected a tandem_rng object");
     rng = R_ExternalPtrAddr(ptr);
-    if (!rng) error("the generator has been freed");
-    return rng;
+    if (rng) return rng;
+    tag = R_ExternalPtrTag(ptr);
+    if (TYPEOF(tag) != RAWSXP || XLENGTH(tag) != STATE_BYTES) error("the generator has been freed");
+    {
+        const unsigned char *b = RAW(tag);
+        uint32_t key[4];
+        for (int w = 0; w < 4; w++) key[w] = (uint32_t)get_le(b + 4 * w, 4);
+        attach(ptr, tandem_from_key(key, get_le(b + POS_OFFSET, 8), (uint32_t)get_le(b + POS_OFFSET + 8, 4)));
+    }
+    return R_ExternalPtrAddr(ptr);
+}
+
+/* Call after every operation that moves the position. */
+static void sync_position(SEXP ptr, const tandem_rng *rng) {
+    put_le(RAW(R_ExternalPtrTag(ptr)) + POS_OFFSET, rng->pos, 8);
 }
 
 static int entropy(uint64_t *lo, uint64_t *hi) {
@@ -183,7 +225,9 @@ SEXP R_tandem_position(SEXP rng) {
 }
 
 SEXP R_tandem_set_position(SEXP rng, SEXP position) {
-    unwrap(rng)->pos = parse_u64(position, "position");
+    tandem_rng *g = unwrap(rng);
+    g->pos = parse_u64(position, "position");
+    sync_position(rng, g);
     return rng;
 }
 
@@ -194,7 +238,9 @@ SEXP R_tandem_chunk_length(SEXP rng) { return ScalarInteger((int)tandem_chunk_le
 SEXP R_tandem_runif(SEXP rng, SEXP n) {
     size_t len = parse_n(n);
     SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)len));
-    tandem_fill_f64(unwrap(rng), REAL(out), len);
+    tandem_rng *g = unwrap(rng);
+    tandem_fill_f64(g, REAL(out), len);
+    sync_position(rng, g);
     UNPROTECT(1);
     return out;
 }
@@ -205,7 +251,9 @@ SEXP R_tandem_rsingle(SEXP rng, SEXP n) {
     double *x = REAL(out);
     /* Fill the second half of the buffer with floats, then widen in place from the front. */
     float *f = (float *)(x + len / 2 + len % 2);
-    tandem_fill_f32(unwrap(rng), f, len);
+    tandem_rng *g = unwrap(rng);
+    tandem_fill_f32(g, f, len);
+    sync_position(rng, g);
     for (size_t i = 0; i < len; i++) x[i] = (double)f[i];
     UNPROTECT(1);
     return out;
@@ -233,6 +281,7 @@ SEXP R_tandem_rbits(SEXP rng, SEXP n, SEXP bits) {
     } else {
         error("bits must be 8, 16 or 32");
     }
+    sync_position(rng, g);
     UNPROTECT(1);
     return out;
 }
@@ -243,6 +292,7 @@ SEXP R_tandem_rbool(SEXP rng, SEXP n) {
     int *x = LOGICAL(out);
     tandem_rng *g = unwrap(rng);
     for (size_t i = 0; i < len; i++) x[i] = tandem_next_bool(g);
+    sync_position(rng, g);
     UNPROTECT(1);
     return out;
 }
@@ -261,7 +311,9 @@ SEXP R_tandem_fork(SEXP rng, SEXP n) {
     size_t len = parse_n(n);
     tandem_rng *kids = R_Calloc(len ? len : 1, tandem_rng);
     SEXP out = PROTECT(allocVector(VECSXP, (R_xlen_t)len));
-    tandem_fork(unwrap(rng), kids, len);
+    tandem_rng *g = unwrap(rng);
+    tandem_fork(g, kids, len);
+    sync_position(rng, g);
     for (size_t i = 0; i < len; i++) SET_VECTOR_ELT(out, (R_xlen_t)i, wrap(kids[i]));
     R_Free(kids);
     UNPROTECT(1);

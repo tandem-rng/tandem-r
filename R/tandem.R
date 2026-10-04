@@ -52,8 +52,43 @@ tandem_set_position <- function(rng, position) invisible(.Call(R_tandem_set_posi
 #' @export
 tandem_chunk_length <- function(rng) .Call(R_tandem_chunk_length, rng)
 
+#' Generator state
+#'
+#' A generator is an external pointer, which a plain `saveRDS()`, `serialize()` or a transfer
+#' to a parallel worker would lose. The pointer carries its transport form as a tag that
+#' serialization keeps, so a generator that went through `saveRDS()`/`readRDS()` or reached a
+#' worker rebuilds itself on first use and continues at the position it had when it was
+#' serialized. Every copy made this way is independent of the others.
+#'
+#' `tandem_state()` returns the transport form as a plain list, for formats other than R's
+#' own: `key` as 32 hex digits, `position` as a string of decimal digits, and `K`.
+#' `tandem_restore()` builds a generator from such a list.
+#'
+#' @param rng A `tandem_rng` object.
+#' @param state A list with `key`, `position` and `K`, as `tandem_state()` returns.
+#' @return `tandem_state()` returns a list, `tandem_restore()` a `tandem_rng` object.
+#' @examples
+#' rng <- tandem(42)
+#' tandem_runif(rng, 3)
+#' copy <- tandem_restore(tandem_state(rng))
+#' identical(tandem_runif(copy, 2), tandem_runif(rng, 2))
+#' @name state
+NULL
+
+#' @rdname state
 #' @export
-print.tandem_rng <- function(x, ...) {
+tandem_state <- function(rng) {
+  pos <- tandem_position(rng)
+  if (!is.character(pos)) pos <- sprintf("%.0f", pos)
+  list(key = tandem_key(rng), position = pos, K = tandem_chunk_length(rng))
+}
+
+#' @rdname state
+#' @export
+tandem_restore <- function(state) tandem_from_key(state$key, state$position, state$K)
+
+#' @export
+print.tandem_rng <-function(x, ...) {
   cat(sprintf("Tandem8x32-K%d key %s position %s\n", tandem_chunk_length(x), tandem_key(x),
               format(tandem_position(x), scientific = FALSE)))
   invisible(x)
