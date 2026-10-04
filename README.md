@@ -75,6 +75,12 @@ retries on a fallback generator derived by index `i`, so a fill uses exactly `n`
 Box-Muller pairs: elements `2j` and `2j + 1` are the cosine and sine halves from the Float64
 draws `2j` and `2j + 1`, and an odd count still consumes both draws of its last pair.
 
+Parallel use: element `i` of a fill is draw `i`, so ranks, threads or devices that start at the
+position of their first element, or draw from `split(task)`, reproduce a serial run for any
+decomposition, as
+[Appendix B](https://github.com/tandem-rng/spec/blob/main/SPEC.md#appendix-b-parallel-decomposition-non-normative)
+of the specification shows.
+
 ## Serialization
 
 A generator is an external pointer, and R drops the address of a pointer on `saveRDS()`,
