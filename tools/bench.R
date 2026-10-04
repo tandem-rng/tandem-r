@@ -5,9 +5,15 @@ library(tandemrng)
 
 n <- 2^22
 bytes <- 8 * n
+# Sys.time resolves microseconds. system.time resolves 1 ms, and a fill of 2^22 doubles takes a
+# few, which rounded the figures.
 best <- function(f, runs = 5) {
   f()
-  min(vapply(seq_len(runs), function(i) system.time(f())[["elapsed"]], numeric(1)))
+  min(vapply(seq_len(runs), function(i) {
+    t0 <- Sys.time()
+    f()
+    as.numeric(Sys.time() - t0, units = "secs")
+  }, numeric(1)))
 }
 
 rng <- tandem(42)

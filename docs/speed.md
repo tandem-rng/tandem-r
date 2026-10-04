@@ -9,12 +9,12 @@ exponential rows count 8 bytes per value.
 
 | | GiB/s |
 |---|---|
-| `tandem_runif(rng, n)` | 15.6 |
-| `runif(n)` with Tandem as the user-supplied generator | 2.2 |
-| `runif(n)`, Mersenne-Twister | 2.4 |
-| `tandem_rnorm(rng, n)` | 10.4 |
+| `tandem_runif(rng, n)` | 9.9 |
+| `runif(n)` with Tandem as the user-supplied generator | 1.9 |
+| `runif(n)`, Mersenne-Twister | 2.1 |
+| `tandem_rnorm(rng, n)` | 5.8 |
 | `rnorm(n)`, Mersenne-Twister with inversion | 0.5 |
-| `tandem_rexp(rng, n)` | 6.2 |
+| `tandem_rexp(rng, n)` | 5.0 |
 | `rexp(n)`, Mersenne-Twister | 0.4 |
 
 The Tandem fill rows are the C fill plus R's allocation of the result. The user-supplied hook returns
