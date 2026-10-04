@@ -170,13 +170,15 @@ tandem_at <- function(rng, type, i) {
 
 #' Bounded integers and normals
 #'
-#' These are not part of the specification. They use the mappings of `Rng::urand(range)` and
-#' `Rng::normal` in the shared C++ core of the CUDA port, so every port returns the same values
+#' These are not part of the specification. They are the bounded fills and normals of the C
+#' library, which follow the shared C++ core of the CUDA port, so every port returns the same values
 #' from the same generator.
 #'
 #' `tandem_sample_int()` returns `n` integers uniform on `[0, max)`, drawn with replacement.
-#' The values start at 0, unlike R's `sample.int()`. It uses Lemire's multiply-and-reject method
-#' on 32-bit stream words when `max` is below `2^32` and on 64-bit words above. The result is an
+#' The values start at 0, unlike R's `sample.int()`. Element `i` maps stream word `i` by Lemire's
+#' multiply-and-reject method, and a rejected word retries on a fallback generator derived from
+#' the generator by index `i`, so a fill uses exactly `n` words whatever is rejected. It reads
+#' 32-bit words when `max` is below `2^32` and 64-bit words above. The result is an
 #' integer vector when `max <= 2^31` and a double vector otherwise.
 #'
 #' `tandem_rnorm()` returns `n` standard normals by the Box-Muller transform. Normal `i` uses the

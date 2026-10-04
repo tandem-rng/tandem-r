@@ -270,56 +270,34 @@ test_that("random access of 64-bit words matches the Julia dump", {
 })
 
 
-# Reference values from Rng::urand(range) and Rng::normal in tandem-cuda core.hpp, compiled on
-# the host, for the key 1,2,3,4 with K = 32 from position 0. The ranges 2^31 + 1 and 2^63 + 1
-# make about half of the draws reject, so they cover the rejection loop.
-test_that("bounded integers match core.hpp", {
-  draw <- function(max, n = 8) tandem_sample_int(tandem_from_key(k1234, 0, 32), n, max)
-  expect_identical(draw(6), c(0L, 2L, 3L, 4L, 1L, 4L, 2L, 3L))
-  expect_identical(draw(1000000), c(40463L, 429666L, 586213L, 672140L, 202966L, 709999L,
-                                    478736L, 547701L))
-  expect_identical(draw(2147483649), c(1258884293, 1443409900, 435866731, 1524711525,
-                                       1028079052, 1176179016, 706997659, 927854521))
-  expect_identical(draw(4294967295), c(173788047, 1845401787, 2517768585, 2886819799, 871733462,
-                                       3049423049, 2056158104, 2352358031))
-  expect_identical(draw(1099511627776), c(472422857738, 739025868950, 780652300851, 602203656314,
-                                          322588895478, 371125492258, 790982109984, 38322953760))
-  expect_identical(sum(as.numeric(draw(1000000, 1000))), 498895745)
-  expect_identical(sum(as.numeric(draw(4294967295, 1000))), 2142743088803)
-  expect_identical(sum(as.numeric(draw(2147483649, 1000))), 1084012906474)
-})
+# Fixtures from tandem-c's tests/cross_fill_below.h and cross_normal.h, which tandem-c generates
+# from the CUDA port's core.hpp (tools/gen_cross_fixtures.R converts them). Every case starts
+# from tandem(42) after one bit draw, which leaves the position unaligned. The bounded ranges
+# above 2^31 and 2^63 reject about half of the draws, so they cover the fallback stream.
+cross <- jsonlite::fromJSON(test_path("data", "cross_bounded.json"), simplifyVector = FALSE)
+after_bit <- function() {
+  rng <- tandem(42)
+  tandem_rbool(rng, 1)
+  rng
+}
 
-test_that("bounded integers consume the stream as core.hpp does", {
-  pos <- function(max, n) {
-    rng <- tandem_from_key(k1234, 0, 32)
-    tandem_sample_int(rng, n, max)
-    tandem_position(rng)
+test_that("bounded fills match the CUDA core", {
+  # tandem_sample_int draws 64-bit words only for ranges above 2^32 - 1, and the values must fit
+  # doubles, so of the 64-bit cases only 10^12 applies.
+  for (cases in list(cross$fill_u32, cross$fill_u64[3])) {
+    for (case in cases) {
+      rng <- after_bit()
+      got <- tandem_sample_int(rng, 64, case$n)
+      expect_equal(as.numeric(got), as.numeric(unlist(case$want)))
+      expect_identical(tandem_position(rng), as.numeric(case$end_pos))
+    }
   }
-  expect_identical(pos(6, 1000), 32000)
-  expect_identical(pos(2147483649, 1000), 64480)
-  expect_identical(pos(4294967296, 1000), 64000)
 })
 
-test_that("64-bit bounded integers match core.hpp", {
-  draw <- function(max) tandem_sample_int(tandem_from_key(k1234, 0, 32), 6, max)
-  expect_identical(draw(4294967297), c(1845401788, 2886819801, 3049423050, 2352358033,
-                                       1260112873, 1449708954))
-  expect_identical(draw("9007199254740992"), c(3870088050592633, 6054099918438979, 6395103648579251,
-                                                 4933252352528847, 2642648231761001, 3040260032579541))
-  expect_identical(draw("9007199254740991"), c(3870088050592633, 6054099918438978,
-                                               6395103648579250, 4933252352528846,
-                                               2642648231761000, 3040260032579541))
-})
-
-test_that("normals match core.hpp", {
-  rng <- tandem_from_key(k1234, 0, 32)
-  expect_equal(tandem_rnorm(rng, 6),
-               c(-0.49800438475843312, -1.5033062567258306, -0.43561570619961548,
-                 1.5561647783641852, -0.58117632765195415, 0.25245381385102506),
-               tolerance = 1e-14)
-  expect_identical(tandem_position(rng), 6 * 128)
-  expect_equal(sum(tandem_rnorm(tandem_from_key(k1234, 0, 32), 1000)), 34.578393393650671,
-               tolerance = 1e-12)
+test_that("normals match the CUDA core", {
+  rng <- after_bit()
+  expect_equal(tandem_rnorm(rng, 64), unlist(cross$normal), tolerance = 1e-13)
+  expect_identical(tandem_position(rng), as.numeric(cross$normal_end_pos))
 })
 
 test_that("normal i is Box-Muller of uniform draws 2i and 2i + 1", {

@@ -73,8 +73,9 @@ uint64_t tandem_u64_below(tandem_rng *rng, uint64_t n);
 
 /* Standard normal by Box-Muller from two tandem_next_f64 draws, u mapped to (0, 1]:
  * sqrt(-2 ln u) cos(2 pi v). It matches Rng::normal of tandem-cuda and is not part of the
- * specification. The f32 version rounds the same double, so it also consumes 128 bits. Link
- * with -lm. */
+ * specification. The f32 version draws two tandem_next_f32 values, 64 bits, and computes in float
+ * as Rng::normalf does. Float libm functions differ between platforms, so f32 normals agree
+ * across ports to a few ulps, not bit for bit. Link with -lm. */
 double tandem_normal_f64(tandem_rng *rng);
 float tandem_normal_f32(tandem_rng *rng);
 
@@ -93,7 +94,11 @@ void tandem_fill_char(tandem_rng *rng, uint32_t *out, size_t n);
 void tandem_fill_c32(tandem_rng *rng, float *out, size_t n);
 void tandem_fill_c64(tandem_rng *rng, double *out, size_t n);
 
-/* len bounded draws, the same values as len calls of tandem_u32_below or tandem_u64_below. */
+/* len bounded draws, as the parallel fills of tandem-cuda: element i maps draw i of
+ * tandem_fill_u32 or tandem_fill_u64 and the fill consumes exactly len draws. A rejected draw is
+ * retried on a fallback generator split(i) of sub(0x424c573332 or 0x424c573634) of the fill's
+ * generator, so the values equal the scalar calls except where a draw is rejected, which has
+ * probability (2^32 mod n) / 2^32, or the 64-bit analogue. */
 void tandem_fill_u32_below(tandem_rng *rng, uint32_t *out, size_t len, uint32_t n);
 void tandem_fill_u64_below(tandem_rng *rng, uint64_t *out, size_t len, uint64_t n);
 

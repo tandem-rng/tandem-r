@@ -580,12 +580,77 @@ uint64_t tandem_u64_below(tandem_rng *rng, uint64_t n) {
     return mulhi64(x, n);
 }
 
+/* Fills cannot know how many draws earlier elements rejected, so element i takes draw i of the
+ * plain fill and consumes exactly one draw. A rejected draw retries with Lemire's rule on a
+ * fallback generator, split(i) of sub(PURPOSE) of the fill's generator at position 0. The
+ * constants are reserved for this and match tandem-cuda. The plain fill keeps the SIMD speed
+ * and the pass over its output rarely leaves the common path. */
+#define PURPOSE_BELOW32 0x424c573332ull
+#define PURPOSE_BELOW64 0x424c573634ull
+
+static tandem_rng below_fallback(const uint32_t key[4], uint32_t K, uint64_t purpose, uint64_t i) {
+    tandem_rng parent = tandem_from_key(key, 0, K), sub = tandem_sub(&parent, purpose);
+    return tandem_split(&sub, i);
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+#define COLD __attribute__((noinline))
+#else
+#define COLD
+#endif
+
+COLD static uint32_t retry_u32(const uint32_t key[4], uint32_t K, uint32_t n, uint32_t t,
+                               uint64_t i) {
+    tandem_rng r = below_fallback(key, K, PURPOSE_BELOW32, i);
+    uint64_t m;
+    do m = (uint64_t)tandem_next_u32(&r) * n;
+    while ((uint32_t)m < t);
+    return (uint32_t)(m >> 32);
+}
+
+COLD static uint64_t retry_u64(const uint32_t key[4], uint32_t K, uint64_t n, uint64_t t,
+                               uint64_t i) {
+    tandem_rng r = below_fallback(key, K, PURPOSE_BELOW64, i);
+    uint64_t x, lo;
+    do {
+        x = tandem_next_u64(&r);
+        lo = x * n;
+    } while (lo < t);
+    return mulhi64(x, n);
+}
+
 void tandem_fill_u32_below(tandem_rng *rng, uint32_t *out, size_t len, uint32_t n) {
-    for (size_t i = 0; i < len; i++) out[i] = tandem_u32_below(rng, n);
+    uint32_t key[4], K = rng->K;
+    memcpy(key, rng->key, 16);
+    tandem_fill_u32(rng, out, len);
+    for (size_t i = 0; i < len; i++) {
+        uint64_t m = (uint64_t)out[i] * n;
+        if ((uint32_t)m < n) {
+            uint32_t t = (0u - n) % n;
+            if ((uint32_t)m < t) {
+                out[i] = retry_u32(key, K, n, t, i);
+                continue;
+            }
+        }
+        out[i] = (uint32_t)(m >> 32);
+    }
 }
 
 void tandem_fill_u64_below(tandem_rng *rng, uint64_t *out, size_t len, uint64_t n) {
-    for (size_t i = 0; i < len; i++) out[i] = tandem_u64_below(rng, n);
+    uint32_t key[4], K = rng->K;
+    memcpy(key, rng->key, 16);
+    tandem_fill_u64(rng, out, len);
+    for (size_t i = 0; i < len; i++) {
+        uint64_t lo = out[i] * n;
+        if (lo < n) {
+            uint64_t t = (0u - n) % n;
+            if (lo < t) {
+                out[i] = retry_u64(key, K, n, t, i);
+                continue;
+            }
+        }
+        out[i] = mulhi64(out[i], n);
+    }
 }
 
 /* ---- Public: normals --------------------------------------------------------------------- */
@@ -599,10 +664,18 @@ double tandem_normal_f64(tandem_rng *rng) {
     return box_muller(a, tandem_next_f64(rng));
 }
 
-float tandem_normal_f32(tandem_rng *rng) { return (float)tandem_normal_f64(rng); }
+/* Entirely in float, as Rng::normalf of tandem-cuda: no double intermediate. */
+static inline float box_muller_f32(float a, float b) {
+    return sqrtf(-2.0f * logf(1.0f - a)) * cosf(2.0f * 3.14159265358979323846f * b);
+}
 
-/* The uniforms of a fill come from tandem_fill_f64 in blocks, which is the same stream as
- * scalar draws because every draw is 64 bits and aligned. */
+float tandem_normal_f32(tandem_rng *rng) {
+    float a = tandem_next_f32(rng);
+    return box_muller_f32(a, tandem_next_f32(rng));
+}
+
+/* The uniforms of a fill come from tandem_fill_f64 or tandem_fill_f32 in blocks, which is the
+ * same stream as scalar draws because every draw is aligned to its width. */
 #define NORMAL_BLOCK 256u
 
 void tandem_fill_normal_f64(tandem_rng *rng, double *out, size_t n) {
@@ -617,11 +690,12 @@ void tandem_fill_normal_f64(tandem_rng *rng, double *out, size_t n) {
 }
 
 void tandem_fill_normal_f32(tandem_rng *rng, float *out, size_t n) {
-    double z[NORMAL_BLOCK];
+    float u[2u * NORMAL_BLOCK];
     while (n) {
         size_t m = n < NORMAL_BLOCK ? n : NORMAL_BLOCK;
-        tandem_fill_normal_f64(rng, z, m);
-        for (size_t i = 0; i < m; i++) out[i] = (float)z[i];
+        tandem_fill_f32(rng, u, 2u * m);
+        for (size_t i = 0; i < m; i++)
+            out[i] = box_muller_f32(u[2u * i], u[2u * i + 1u]);
         out += m;
         n -= m;
     }
