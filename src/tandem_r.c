@@ -7,6 +7,7 @@
 #include <R_ext/Rdynload.h>
 #include <R_ext/Random.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "tandem.h"
@@ -412,6 +413,23 @@ SEXP R_tandem_rnorm(SEXP rng, SEXP n) {
     return out;
 }
 
+SEXP R_tandem_rexp(SEXP rng, SEXP n, SEXP rate) {
+    size_t len = parse_n(n);
+    double r = asReal(rate);
+    SEXP out;
+    tandem_rng *g;
+    if (!(r > 0) || !R_FINITE(r)) error("'rate' must be positive and finite");
+    out = PROTECT(allocVector(REALSXP, (R_xlen_t)len));
+    g = unwrap(rng);
+    tandem_fill_exponential_f64(g, REAL(out), len);
+    /* A division, not a product by 1/rate, so that Exp(rate) is the correctly rounded e / rate. */
+    if (r != 1)
+        for (size_t i = 0; i < len; i++) REAL(out)[i] /= r;
+    sync_position(rng, g);
+    UNPROTECT(1);
+    return out;
+}
+
 /* The bytes of the normal fills tandem-c hashes in tests/test_normal_bits.c, hashed here to show
  * that this build, with R's compiler and flags, produces the same bits. Internal, used by tests. */
 SEXP R_tandem_normal_hash(void) {
@@ -430,6 +448,38 @@ SEXP R_tandem_normal_hash(void) {
         tandem_fill_normal_f32(&g, f, 2 * PAIRS - 1);
         b = (const unsigned char *)f;
         for (size_t k = 0; k < (2 * PAIRS - 1) * sizeof *f; k++) h = (h ^ b[k]) * 0x100000001b3ull;
+    }
+    snprintf(text, sizeof text, "%016llx", (unsigned long long)h);
+    return mkString(text);
+}
+
+/* The C library's strtod rounds correctly, R's parser can be one ulp off where long double is
+ * not wider than double. Internal, used by tests to read bit exact fixtures. */
+SEXP R_tandem_strtod(SEXP text) {
+    R_xlen_t len = xlength(text);
+    SEXP out = PROTECT(allocVector(REALSXP, len));
+    for (R_xlen_t i = 0; i < len; i++) REAL(out)[i] = strtod(CHAR(STRING_ELT(text, i)), NULL);
+    UNPROTECT(1);
+    return out;
+}
+
+/* The exponential counterpart, hashing the bytes of tandem-c's tests/test_exponential_bits.c. */
+SEXP R_tandem_exponential_hash(void) {
+    enum { N = 1000000 };
+    const uint64_t starts[] = {0, 1, 77, 12345, (uint64_t)1 << 30};
+    uint64_t h = 0xcbf29ce484222325ull;
+    double *d = (double *)R_alloc(N, sizeof *d);
+    float *f = (float *)R_alloc(N, sizeof *f);
+    char text[17];
+    for (size_t i = 0; i < sizeof starts / sizeof starts[0]; i++) {
+        tandem_rng g = tandem_seed(2026, 7, 0);
+        const unsigned char *b = (const unsigned char *)d;
+        tandem_set_position(&g, starts[i]);
+        tandem_fill_exponential_f64(&g, d, N);
+        for (size_t k = 0; k < N * sizeof *d; k++) h = (h ^ b[k]) * 0x100000001b3ull;
+        tandem_fill_exponential_f32(&g, f, N);
+        b = (const unsigned char *)f;
+        for (size_t k = 0; k < N * sizeof *f; k++) h = (h ^ b[k]) * 0x100000001b3ull;
     }
     snprintf(text, sizeof text, "%016llx", (unsigned long long)h);
     return mkString(text);
@@ -573,6 +623,9 @@ static const R_CallMethodDef calls[] = {
     {"R_tandem_below", (DL_FUNC)&R_tandem_below, 4},
     {"R_tandem_rnorm", (DL_FUNC)&R_tandem_rnorm, 2},
     {"R_tandem_normal_hash", (DL_FUNC)&R_tandem_normal_hash, 0},
+    {"R_tandem_strtod", (DL_FUNC)&R_tandem_strtod, 1},
+    {"R_tandem_rexp",(DL_FUNC)&R_tandem_rexp, 3},
+    {"R_tandem_exponential_hash", (DL_FUNC)&R_tandem_exponential_hash, 0},
     {"R_tandem_split", (DL_FUNC)&R_tandem_split, 2},
     {"R_tandem_sub", (DL_FUNC)&R_tandem_sub, 2},
     {"R_tandem_fork", (DL_FUNC)&R_tandem_fork, 2},

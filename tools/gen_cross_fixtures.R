@@ -20,9 +20,21 @@ normals <- function(text, name) {
   as.numeric(sub("f$", "", strsplit(gsub("\\s+", "", body), ",")[[1]]))
 }
 
+# Only the double table. R has no single precision fill, and the C test pins the floats. The values
+# stay text, since R's own parser can miss the correctly rounded double by one ulp.
+exponentials <- function(text) {
+  body <- sub("\\n\\};.*$", "", sub(".*CROSS_EXPONENTIAL\\[\\] = \\{", "", text))
+  m <- regmatches(body, gregexpr("\\{[0-9]+ull,[^u]*u\\}", body))[[1]]
+  lapply(m, function(s) {
+    nums <- regmatches(s, gregexpr("[0-9]+(\\.[0-9]+)?(e[-+]?[0-9]+)?", s))[[1]]
+    list(start = nums[1], want = nums[2:(length(nums) - 1)], end_pos = nums[length(nums)])
+  })
+}
+
 fill <- read("cross_fill_below.h")
 normal <- read("cross_normal.h")
 out <- list(
+  exponential = exponentials(read("cross_exponential.h")),
   fill_u32 = cases(fill, "CROSS_FILL_U32"),
   fill_u64 = cases(fill, "CROSS_FILL_U64"),
   normal = normals(normal, "CROSS_NORMAL"),

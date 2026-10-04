@@ -364,6 +364,49 @@ test_that("normal fills are bit identical to tandem-c's recorded hash", {
   expect_identical(.Call(tandemrng:::R_tandem_normal_hash), "9414e1315e2653be")
 })
 
+test_that("exponentials are bit identical to tandem-c's fixture from the CUDA core", {
+  for (case in cross$exponential) {
+    rng <- at_start(case$start)
+    expect_identical(tandem_rexp(rng, 64), .Call(tandemrng:::R_tandem_strtod, unlist(case$want)))
+    expect_identical(tandem_position(rng), as.numeric(case$end_pos))
+  }
+})
+
+test_that("exponentials are bit identical to tandem-c's recorded hash", {
+  expect_identical(.Call(tandemrng:::R_tandem_exponential_hash), "47f8f98297d94ee2")
+})
+
+test_that("an exponential fill cut at any element equals the whole fill", {
+  whole <- tandem_rexp(at_start(12345), 200)
+  for (k in c(0, 1, 2, 31, 32, 33, 100, 199, 200)) {
+    rng <- at_start(12345)
+    expect_identical(c(tandem_rexp(rng, k), tandem_rexp(rng, 200 - k)), whole)
+    expect_identical(tandem_position(rng), (ceiling(12345 / 64) + 200) * 64)
+  }
+})
+
+test_that("an empty exponential fill leaves an unaligned position alone", {
+  rng <- tandem(42)
+  tandem_rbool(rng, 1)
+  expect_length(tandem_rexp(rng, 0), 0)
+  expect_identical(tandem_position(rng), 1)
+})
+
+test_that("a rate divides the unit exponentials", {
+  expect_identical(tandem_rexp(tandem(42), 50, 2.5), tandem_rexp(tandem(42), 50) / 2.5)
+})
+
+test_that("exponentials have the moments and distribution of Exp(1)", {
+  n <- 1e7
+  x <- tandem_rexp(tandem(2026), n)
+  for (k in 1:4) {
+    # Var(X^k) = (2k)! - (k!)^2 for X ~ Exp(1).
+    z <- (mean(x^k) - factorial(k)) / sqrt((factorial(2 * k) - factorial(k)^2) / n)
+    expect_lt(abs(z), 4)
+  }
+  expect_gt(suppressWarnings(ks.test(x, "pexp"))$p.value, 1e-3)
+})
+
 test_that("empty bounded fills leave an unaligned position alone", {
   for (f in list(tandem_below, tandem_sample_int)) {
     for (max in c(6, 4294967297)) {

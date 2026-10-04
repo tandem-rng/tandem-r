@@ -168,11 +168,11 @@ tandem_at <- function(rng, type, i) {
   .Call(R_tandem_at, rng, type, i, !bit64_available())
 }
 
-#' Bounded integers and normals
+#' Bounded integers, normals and exponentials
 #'
-#' These are not part of the specification. They are the bounded fills and normals of the C
+#' The bounded fills and normals are not part of the specification. They are the fills of the C
 #' library, which follow the shared C++ core of the CUDA port, so every port returns the same values
-#' from the same generator.
+#' from the same generator. Exponentials are in an appendix of the specification.
 #'
 #' `tandem_sample_int()` returns `n` integers uniform on `1..max`, drawn with replacement, as
 #' `sample.int(max, n, replace = TRUE)` does. It is the C bounded fill plus 1. `tandem_below()`
@@ -192,16 +192,26 @@ tandem_at <- function(rng, type, i) {
 #' advances past both draws, so a fill consumes `2 ceiling(n / 2)` draws. Values agree across
 #' ports to about 1e-12 relative, since libm functions differ in the last places.
 #'
+#' `tandem_rexp()` returns `n` exponentials as in Appendix A of the specification. Element `i` is
+#' `-log(1 - u)` for the Float64 draw `u` number `i`, divided by `rate`, so a fill is random
+#' access and uses exactly `n` draws. The logarithm is the polynomial of the C library, in
+#' the same fused arithmetic on every port, so the values at `rate = 1` are bit identical
+#' across ports. Base R has no user-supplied hook for exponentials, so
+#' `rexp()` after `RNGkind("user-supplied")` runs R's own algorithm on the Tandem uniforms and does
+#' not return these values.
+#'
 #' @param rng A `tandem_rng` object.
 #' @param n The number of values.
 #' @param max The number of values to choose from, an integer-valued number or decimal string in
 #'   `[1, 2^53]`, where `2^53` itself needs the string form.
+#' @param rate The rate of the exponential, a positive finite number.
 #' @return An integer or double vector.
 #' @examples
 #' rng <- tandem(42)
 #' tandem_sample_int(rng, 5, 6)
 #' tandem_below(rng, 5, 6)
 #' tandem_rnorm(rng, 3)
+#' tandem_rexp(rng, 3)
 #' @name distributions
 NULL
 
@@ -216,6 +226,10 @@ tandem_below <- function(rng, n, max) .Call(R_tandem_below, rng, as.double(n), m
 #' @rdname distributions
 #' @export
 tandem_rnorm <- function(rng, n) .Call(R_tandem_rnorm, rng, as.double(n))
+
+#' @rdname distributions
+#' @export
+tandem_rexp <- function(rng, n, rate = 1) .Call(R_tandem_rexp, rng, as.double(n), as.double(rate))
 
 #' Derived generators
 #'

@@ -1,5 +1,6 @@
 # Throughput of 2^22 doubles: tandem_runif, base runif with Tandem as the user-supplied
-# generator, base runif with Mersenne-Twister, tandem_rnorm and base rnorm (inversion).
+# generator, base runif with Mersenne-Twister, tandem_rnorm, base rnorm (inversion), tandem_rexp and
+# base rexp.
 library(tandemrng)
 
 n <- 2^22
@@ -20,6 +21,8 @@ rows <- c(
   "runif(n), Tandem user-supplied" = user,
   "runif(n), Mersenne-Twister" = bytes / best(function() runif(n)) / 2^30,
   "tandem_rnorm(rng, n)" = bytes / best(function() tandem_rnorm(rng, n)) / 2^30,
-  "rnorm(n), Mersenne-Twister" = bytes / best(function() rnorm(n)) / 2^30
+  "rnorm(n), Mersenne-Twister" = bytes / best(function() rnorm(n)) / 2^30,
+  "tandem_rexp(rng, n)" = bytes / best(function() tandem_rexp(rng, n)) / 2^30,
+  "rexp(n), Mersenne-Twister" = bytes / best(function() rexp(n)) / 2^30
 )
 for (name in names(rows)) cat(sprintf("%-30s %6.2f GiB/s\n", name, rows[[name]]))

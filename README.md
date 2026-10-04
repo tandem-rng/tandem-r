@@ -4,7 +4,7 @@
 
 R package `tandemrng` for [Tandem8x32](https://github.com/tandem-rng/spec), a noncryptographic
 pseudorandom number generator built to be fast on CPUs and GPUs alike. It wraps a vendored
-copy of the reference C implementation, tandem-c at commit 8f1f057, and produces the stream
+copy of the reference C implementation, tandem-c at commit b049384, and produces the stream
 the specification defines, bit for bit.
 
 ## Use
@@ -22,6 +22,7 @@ x <- tandem_at(rng, "f64", c(0, 5, 1e6))  # elements of the next fill, without d
 i <- tandem_sample_int(rng, 10, 6)   # uniform on 1..6, like sample.int(6, 10, TRUE)
 j <- tandem_below(rng, 10, 6)        # the same fill on 0..5, as the other ports return it
 z <- tandem_rnorm(rng, 10)           # standard normals by Box-Muller, as in core.hpp
+e <- tandem_rexp(rng, 10, rate = 2)    # exponentials -log(1 - u) / rate, one draw each
 worker <- tandem_split(rng, 7)       # by index, from the key alone
 kids <- tandem_fork(rng, 4)          # from the current block, parent moves on
 tandem_key(rng); tandem_position(rng); tandem_chunk_length(rng)
@@ -62,9 +63,9 @@ character vector of 16 lowercase hex digits per word, most significant digit fir
 position, without moving the generator, for `"u32"`, `"u64"`, `"f32"` and `"f64"`. Elements
 count from 0, as in the specification. `i` may be a vector.
 
-`tandem_sample_int(rng, n, max)`, `tandem_below(rng, n, max)` and `tandem_rnorm(rng, n)` draw
-bounded integers and
-standard normals from a generator, not from the base R hook. They are not part of the
+`tandem_sample_int(rng, n, max)`, `tandem_below(rng, n, max)`, `tandem_rnorm(rng, n)` and
+`tandem_rexp(rng, n, rate = 1)` draw bounded integers, standard normals and exponentials from a
+generator, not from the base R hook. The bounded integers and normals are not part of the
 specification. They are the C library's bounded fills and normals, which follow the CUDA
 port's `core.hpp`, so every port returns the same values. `tandem_below()` returns the C fill,
 uniform on `0..(max - 1)`, and `tandem_sample_int()` adds 1, so it is uniform on `1..max` like
@@ -75,6 +76,12 @@ the word width plus `i`, so a fill uses exactly `n` words and a fill cut at any 
 the whole fill. It reads 32-bit words, or 64-bit words for `max` above `2^32`. Normals come in
 Box-Muller pairs: elements `2j` and `2j + 1` are the cosine and sine halves from the Float64
 draws `2j` and `2j + 1`, and an odd count still consumes both draws of its last pair.
+
+Exponentials follow [Appendix A](https://github.com/tandem-rng/spec/blob/main/SPEC.md) of the
+specification: element `i` is `-log(1 - u) / rate` for the Float64 draw `u` number `i`, one draw
+each, so a fill is random access and uses exactly `n` draws. At `rate = 1` the values are bit
+identical across ports. Base R has no user-supplied hook for exponentials, so `rexp()` after
+`RNGkind("user-supplied")` runs R's own algorithm on the Tandem uniforms and does not return them.
 
 Parallel use: element `i` of a fill is draw `i`, so ranks, threads or devices that start at the
 position of their first element, or draw from `split(task)`, reproduce a serial run for any
@@ -126,13 +133,17 @@ compared with tandem-c's fixtures, generated from `core.hpp` and converted to
 about half of the draws, the stream position after them, and 128 normals. A bounded fill cut at
 an arbitrary element equals the whole fill at an unaligned start with rejections, the word width
 changes at `max = 2^32 + 1`, and a hash of 10^7 normals in both precisions matches tandem-c's
-recorded value, which pins the bits on every compiler CI builds with. CI fails when
+recorded value, which pins the bits on every compiler CI builds with. Exponentials are compared
+bit for bit with tandem-c's fixture, also from `core.hpp`, at five start positions, unaligned ones
+included, and with tandem-c's recorded hash of 10^6 doubles and 10^6 floats from each of those
+starts. A cut fill equals the whole fill, an empty fill leaves the position alone, and 10^7
+exponentials have the first four moments and the Kolmogorov-Smirnov statistic of Exp(1). CI fails when
 the vendored C sources in `src/` or the vectors drift from upstream. `tools/sync_c.sh` refreshes the C sources.
 
 ## Speed
 
 Apple M4, one thread, `pixi run bench`, 2^22 doubles, minimum of five runs. The normals rows
-count 8 bytes per normal:
+count 8 bytes per normal or exponential:
 
 | | GiB/s |
 |---|---|
@@ -141,8 +152,10 @@ count 8 bytes per normal:
 | `runif(n)`, Mersenne-Twister | 2.4 |
 | `tandem_rnorm(rng, n)` | 5.2 |
 | `rnorm(n)`, Mersenne-Twister with inversion | 0.5 |
+| `tandem_rexp(rng, n)` | 6.2 |
+| `rexp(n)`, Mersenne-Twister | 0.4 |
 
-The first and fourth rows are the C fill plus R's allocation of the result. The user-supplied hook returns
+The Tandem fill rows are the C fill plus R's allocation of the result. The user-supplied hook returns
 one double per call, so `runif` through it runs at R's call rate. The hook fills a buffer of
 1024 doubles at a time and keeps its state in `.Random.seed`. A draw checks one 64-bit token
 against the buffer's. The cold

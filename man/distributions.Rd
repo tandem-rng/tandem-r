@@ -5,13 +5,16 @@
 \alias{tandem_sample_int}
 \alias{tandem_below}
 \alias{tandem_rnorm}
-\title{Bounded integers and normals}
+\alias{tandem_rexp}
+\title{Bounded integers, normals and exponentials}
 \usage{
 tandem_sample_int(rng, n, max)
 
 tandem_below(rng, n, max)
 
 tandem_rnorm(rng, n)
+
+tandem_rexp(rng, n, rate = 1)
 }
 \arguments{
 \item{rng}{A \code{tandem_rng} object.}
@@ -20,14 +23,16 @@ tandem_rnorm(rng, n)
 
 \item{max}{The number of values to choose from, an integer-valued number or decimal string in
 \verb{[1, 2^53]}, where \code{2^53} itself needs the string form.}
+
+\item{rate}{The rate of the exponential, a positive finite number.}
 }
 \value{
 An integer or double vector.
 }
 \description{
-These are not part of the specification. They are the bounded fills and normals of the C
+The bounded fills and normals are not part of the specification. They are the fills of the C
 library, which follow the shared C++ core of the CUDA port, so every port returns the same values
-from the same generator.
+from the same generator. Exponentials are in an appendix of the specification.
 }
 \details{
 \code{tandem_sample_int()} returns \code{n} integers uniform on \verb{1..max}, drawn with replacement, as
@@ -47,10 +52,19 @@ mapped to \verb{(0, 1]}. With the radius \verb{sqrt(-2 log u)}, the cosine half 
 \verb{sin(2 pi v)}. An odd \code{n} uses the cosine half of its last pair and still
 advances past both draws, so a fill consumes \verb{2 ceiling(n / 2)} draws. Values agree across
 ports to about 1e-12 relative, since libm functions differ in the last places.
+
+\code{tandem_rexp()} returns \code{n} exponentials as in Appendix A of the specification. Element \code{i} is
+\code{-log(1 - u)} for the Float64 draw \code{u} number \code{i}, divided by \code{rate}, so a fill is random
+access and uses exactly \code{n} draws. The logarithm is the polynomial of the C library, in
+the same fused arithmetic on every port, so the values at \code{rate = 1} are bit identical
+across ports. Base R has no user-supplied hook for exponentials, so
+\code{rexp()} after \code{RNGkind("user-supplied")} runs R's own algorithm on the Tandem uniforms and does
+not return these values.
 }
 \examples{
 rng <- tandem(42)
 tandem_sample_int(rng, 5, 6)
 tandem_below(rng, 5, 6)
 tandem_rnorm(rng, 3)
+tandem_rexp(rng, 3)
 }
