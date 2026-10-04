@@ -1,6 +1,7 @@
 /* Tandem8x32 reference implementation. See tandem.h and the specification. */
 #include "tandem.h"
 
+#include <math.h>
 #include <string.h>
 #if defined(__ARM_NEON) && defined(__aarch64__)
 #include <arm_neon.h>
@@ -439,6 +440,13 @@ void tandem_key(const tandem_rng *rng, uint32_t key[4]) { memcpy(key, rng->key, 
 uint64_t tandem_position(const tandem_rng *rng) { return rng->pos; }
 uint32_t tandem_chunk_length(const tandem_rng *rng) { return rng->K; }
 
+bool tandem_set_position(tandem_rng *rng, uint64_t pos) {
+    if (pos >> 63) return false;
+    rng->pos = pos;
+    rng->cached = 0u;
+    return true;
+}
+
 /* ---- Public: scalar draws --------------------------------------------------------------- */
 
 bool tandem_next_bool(tandem_rng *rng) { return next(rng, 1) != 0; }
@@ -538,6 +546,86 @@ void tandem_fill_char(tandem_rng *rng, uint32_t *out, size_t n) {
 
 void tandem_fill_c32(tandem_rng *rng, float *out, size_t n) { tandem_fill_f32(rng, out, 2u * n); }
 void tandem_fill_c64(tandem_rng *rng, double *out, size_t n) { tandem_fill_f64(rng, out, 2u * n); }
+
+/* ---- Public: bounded integers ------------------------------------------------------------ */
+
+/* High word of a 64 x 64-bit product from 32-bit halves, since C99 has no 128-bit type. */
+static uint64_t mulhi64(uint64_t a, uint64_t b) {
+    uint64_t a0 = a & 0xffffffffu, a1 = a >> 32, b0 = b & 0xffffffffu, b1 = b >> 32;
+    uint64_t mid = a1 * b0 + ((a0 * b0) >> 32);
+    uint64_t mid2 = a0 * b1 + (mid & 0xffffffffu);
+    return a1 * b1 + (mid >> 32) + (mid2 >> 32);
+}
+
+/* The rejection threshold (2^w mod n) is computed only when the low word is below n, which
+ * keeps the division off the common path. */
+uint32_t tandem_u32_below(tandem_rng *rng, uint32_t n) {
+    uint64_t m = (uint64_t)tandem_next_u32(rng) * n;
+    if ((uint32_t)m < n) {
+        uint32_t t = (0u - n) % n;
+        while ((uint32_t)m < t) m = (uint64_t)tandem_next_u32(rng) * n;
+    }
+    return (uint32_t)(m >> 32);
+}
+
+uint64_t tandem_u64_below(tandem_rng *rng, uint64_t n) {
+    uint64_t x = tandem_next_u64(rng), lo = x * n;
+    if (lo < n) {
+        uint64_t t = (0u - n) % n;
+        while (lo < t) {
+            x = tandem_next_u64(rng);
+            lo = x * n;
+        }
+    }
+    return mulhi64(x, n);
+}
+
+void tandem_fill_u32_below(tandem_rng *rng, uint32_t *out, size_t len, uint32_t n) {
+    for (size_t i = 0; i < len; i++) out[i] = tandem_u32_below(rng, n);
+}
+
+void tandem_fill_u64_below(tandem_rng *rng, uint64_t *out, size_t len, uint64_t n) {
+    for (size_t i = 0; i < len; i++) out[i] = tandem_u64_below(rng, n);
+}
+
+/* ---- Public: normals --------------------------------------------------------------------- */
+
+static inline double box_muller(double a, double b) {
+    return sqrt(-2.0 * log(1.0 - a)) * cos(6.283185307179586 * b);
+}
+
+double tandem_normal_f64(tandem_rng *rng) {
+    double a = tandem_next_f64(rng);
+    return box_muller(a, tandem_next_f64(rng));
+}
+
+float tandem_normal_f32(tandem_rng *rng) { return (float)tandem_normal_f64(rng); }
+
+/* The uniforms of a fill come from tandem_fill_f64 in blocks, which is the same stream as
+ * scalar draws because every draw is 64 bits and aligned. */
+#define NORMAL_BLOCK 256u
+
+void tandem_fill_normal_f64(tandem_rng *rng, double *out, size_t n) {
+    double u[2u * NORMAL_BLOCK];
+    while (n) {
+        size_t m = n < NORMAL_BLOCK ? n : NORMAL_BLOCK;
+        tandem_fill_f64(rng, u, 2u * m);
+        for (size_t i = 0; i < m; i++) out[i] = box_muller(u[2u * i], u[2u * i + 1u]);
+        out += m;
+        n -= m;
+    }
+}
+
+void tandem_fill_normal_f32(tandem_rng *rng, float *out, size_t n) {
+    double z[NORMAL_BLOCK];
+    while (n) {
+        size_t m = n < NORMAL_BLOCK ? n : NORMAL_BLOCK;
+        tandem_fill_normal_f64(rng, z, m);
+        for (size_t i = 0; i < m; i++) out[i] = (float)z[i];
+        out += m;
+        n -= m;
+    }
+}
 
 /* ---- Public: random access and derived generators --------------------------------------- */
 
