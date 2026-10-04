@@ -116,13 +116,14 @@ Apple M4, one thread, `pixi run bench`, 2^24 doubles, minimum of seven runs:
 | | GiB/s |
 |---|---|
 | `tandem_runif(rng, n)` | 11.4 |
-| `runif(n)` with Tandem as the user-supplied generator | 2.05 |
+| `runif(n)` with Tandem as the user-supplied generator | 1.71 |
 | `runif(n)`, Mersenne-Twister | 2.2 |
 
 The first row is the C fill plus R's allocation of the result. The user-supplied hook returns
 one double per call, so `runif` through it runs at R's call rate. The hook fills a buffer of
-1024 doubles at a time, which leaves only the indirect call into the package between it and
-the built-in generator. `pixi run bench` installs the package first, so it measures the
+1024 doubles at a time. Keeping its state in `.Random.seed` costs a check per draw that the
+state still matches the buffer, which put the figure below the built-in generator, from 2.05
+GiB/s before the state moved. `pixi run bench` installs the package first, so it measures the
 current sources.
 
 ## AI assistance
