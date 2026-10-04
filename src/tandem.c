@@ -1,8 +1,17 @@
+#ifndef TANDEM_AVX2_PASS
 /* Tandem8x32 reference implementation. See tandem.h and the specification. */
 #include "tandem.h"
 
 #include <math.h>
 #include <string.h>
+#if defined(__x86_64__) && !defined(TANDEM_NO_SIMD) && !defined(TANDEM_NO_AVX2) &&              \
+    (defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 12))
+/* A second copy of the row loop and the normal loop is compiled for AVX2 and FMA, and chosen at
+ * run time, so a plain -O2 build is fast on current x86 and still runs on older x86. The file
+ * includes itself once with TANDEM_AVX2_PASS defined to make it, so it must keep its name. */
+#define TANDEM_AVX2 1
+#include <immintrin.h>
+#endif
 #if defined(__ARM_NEON) && defined(__aarch64__)
 #include <arm_neon.h>
 #elif defined(__SSE2__)
@@ -76,7 +85,61 @@ void tandem_block(const uint32_t key[4], uint64_t c, uint32_t j, uint32_t out[4]
     tandem_F_keyed(key, c, DOMAIN_STREAM, AUX_STREAM, out, h);
     for (uint32_t s = 0; s <= j; s++) step_T(out, h);
 }
+#endif /* TANDEM_AVX2_PASS */
 
+#ifndef TANDEM_AVX2_PASS
+/* ---- Public: normals --------------------------------------------------------------------- */
+
+/* Box-Muller without libm in the loop, so that the compiler vectorizes a block of pairs. A
+ * pair (a, b) gives r = sqrt(-2 ln(1 - a)) and the normals r cos(2 pi b) and r sin(2 pi b),
+ * cos first.
+ *
+ * ln(1 - a): 1 - a is exact and in (0, 1]. Split it as m 2^e with m in [sqrt(1/2), sqrt(2)) by
+ * its exponent bits, then ln m = 2 s (1 + z/3 + z^2/5 + ...) with s = (m - 1) / (m + 1) and
+ * z = s^2 <= 0.0295, a short series that keeps the relative error near the last bit even for
+ * a close to 0.
+ *
+ * cos and sin of 2 pi b: b - q/4 for the nearest quarter turn q is exact, so the angle in
+ * [-pi/4, pi/4] needs no range reduction. Taylor series give cos and sin there, and the
+ * quarter turn is a swap and sign change. */
+#if defined(__clang__)
+#pragma STDC FP_CONTRACT OFF
+#endif
+
+/* Every multiply-add of the normal loop is an explicit fused multiply-add, so that every
+ * compiler and target gives the same bits. On hardware without a fused instruction fma() is a
+ * correct but slow library call that the compiler cannot vectorize, so x86 runs the AVX2 and FMA
+ * copy of the loop when the CPU has them. Plain products and sums are never contracted, because
+ * the loop is built with contraction off. */
+#define FMA(x, y, z) fma((x), (y), (z))
+#define FMAF(x, y, z) fmaf((x), (y), (z))
+
+/* Compilers may fuse or inline differently per call site. One out-of-line body for each
+ * precision keeps the scalar draws and the fills bit identical. */
+#if defined(__clang__)
+#define NOINLINE __attribute__((noinline))
+#elif defined(__GNUC__)
+#define NOINLINE __attribute__((noinline, optimize("no-math-errno", "fp-contract=off")))
+#else
+#define NOINLINE
+#endif
+
+/* sqrt may set errno on a negative argument, which keeps it a library call on glibc and stops
+ * the loop from vectorizing. The argument is never negative here, so the plain instruction is
+ * right. Clang gets the intrinsic, and GCC the same through no-math-errno above. */
+#if defined(__clang__) && defined(__has_builtin)
+#if __has_builtin(__builtin_elementwise_sqrt)
+#define SQRT(x) __builtin_elementwise_sqrt(x)
+#define SQRTF(x) __builtin_elementwise_sqrt(x)
+#endif
+#endif
+#ifndef SQRT
+#define SQRT(x) sqrt(x)
+#define SQRTF(x) sqrtf(x)
+#endif
+#endif /* TANDEM_AVX2_PASS */
+
+#ifndef TANDEM_AVX2_PASS
 /* ---- Eight lanes ---------------------------------------------------------------------
  *
  * A row is the eight chunks of a group at one step, so the cache is word-major, o[word][lane],
@@ -193,7 +256,13 @@ static inline void store_block(u32x4 b, char *dst, store_mode mode) {
 #if defined(__ARM_NEON) && defined(__aarch64__)
         float64x2_t f = vcvtq_n_f64_u64(vshrq_n_u64((uint64x2_t)w, 11), 53);
 #else
-        f64x2 f = __builtin_convertvector(w >> 11, f64x2) * 0x1p-53;
+        /* No unsigned 64-bit to double conversion before AVX-512, and the value is below 2^53, so
+           adding its halves to 2^84 and 2^52 is exact. */
+        u64x2 x = w >> 11, hi = (x >> 32) | 0x4530000000000000u, lo = (x & 0xffffffffu) | 0x4330000000000000u;
+        f64x2 fh, fl;
+        memcpy(&fh, &hi, 16);
+        memcpy(&fl, &lo, 16);
+        f64x2 f = ((fh - (0x1p84 + 0x1p52)) + fl) * 0x1p-53;
 #endif
         memcpy(dst, &f, 16);
     } else {
@@ -315,7 +384,138 @@ static inline void lanes_store(const lanes *L, char *dst, store_mode mode) {
     }
 }
 #endif
+#else /* TANDEM_AVX2_PASS: eight lanes in one 256-bit vector */
+#define lanes lanes_avx2
+#define lanes_load lanes_load_avx2
+#define lanes_save lanes_save_avx2
+#define lanes_T lanes_T_avx2
+#define lanes_seed lanes_seed_avx2
+#define lanes_store lanes_store_avx2
 
+typedef uint32_t u32x8 __attribute__((vector_size(32)));
+typedef uint64_t u64x4_avx2 __attribute__((vector_size(32)));
+typedef float f32x8 __attribute__((vector_size(32)));
+typedef double f64x4 __attribute__((vector_size(32)));
+
+typedef struct {
+    u32x8 o[4], h[4]; /* eight lanes of each word */
+} lanes;
+
+static inline u32x8 vrotl8(u32x8 x, unsigned r) { return (x << r) | (x >> (32u - r)); }
+
+/* The 32x32 to 64-bit products of the eight lanes: vpmuludq takes the even lanes, and the odd
+ * lanes after a shift, and a shuffle puts the low and high words back in lane order. */
+static inline void vmul_wide8(u32x8 a, u32x8 b, u32x8 *lo, u32x8 *hi) {
+    __m256i va = (__m256i)a, vb = (__m256i)b;
+    u32x8 p02 = (u32x8)_mm256_mul_epu32(va, vb);
+    u32x8 p13 = (u32x8)_mm256_mul_epu32(_mm256_srli_epi64(va, 32), _mm256_srli_epi64(vb, 32));
+    *lo = __builtin_shufflevector(p02, p13, 0, 8, 2, 10, 4, 12, 6, 14);
+    *hi = __builtin_shufflevector(p02, p13, 1, 9, 3, 11, 5, 13, 7, 15);
+}
+
+static inline void lanes_T(lanes *L) {
+    u32x8 *o = L->o, *h = L->h;
+    u32x8 lo0, hi0, lo1, hi1;
+    vmul_wide8(o[0], h[0] | 1u, &lo0, &hi0);
+    vmul_wide8(o[2], h[1] | 1u, &lo1, &hi1);
+    u32x8 n0 = o[1] ^ hi1 ^ lo1;
+    u32x8 n1 = vrotl8(lo1, 16) ^ h[2];
+    u32x8 n2 = o[3] ^ hi0 ^ lo0;
+    u32x8 n3 = vrotl8(lo0, 16) ^ h[3];
+
+    h[0] ^= vrotl8(h[1], 7);
+    h[1] ^= vrotl8(h[2], 13);
+    h[2] ^= vrotl8(h[3], 22);
+    h[3] ^= vrotl8(h[0], 3);
+    h[0] = (h[0] + CLOCK_WEYL) ^ n0;
+
+    o[0] = n0;
+    o[1] = n1;
+    o[2] = n2;
+    o[3] = n3;
+}
+
+static inline void lanes_seed(lanes *L, const uint32_t key[4], uint64_t g) {
+    uint64_t c0 = 8u * g;
+    uint32_t lo = (uint32_t)c0;
+    u32x8 counter = {lo, lo + 1u, lo + 2u, lo + 3u, lo + 4u, lo + 5u, lo + 6u, lo + 7u};
+    u32x8 zero = {0, 0, 0, 0, 0, 0, 0, 0};
+    lanes w;
+    w.o[0] = counter;
+    w.o[1] = zero + (uint32_t)(c0 >> 32);
+    w.o[2] = zero + DOMAIN_STREAM;
+    w.o[3] = zero + AUX_STREAM;
+    for (int i = 0; i < 4; i++) w.h[i] = zero + key[i];
+    for (int r = 0; r < 8; r++) {
+        lanes_T(&w);
+        w.o[0] ^= RC[r];
+        u32x8 t0 = w.o[0], t1 = w.o[1], t2 = w.o[2], t3 = w.o[3];
+        w.o[0] = w.h[0], w.o[1] = w.h[1], w.o[2] = w.h[2], w.o[3] = w.h[3];
+        w.h[0] = t0, w.h[1] = t1, w.h[2] = t2, w.h[3] = t3;
+    }
+    *L = w;
+}
+
+static inline void lanes_load(lanes *L, const tandem_rng *rng) {
+    for (unsigned w = 0; w < 4; w++) {
+        memcpy(&L->o[w], &rng->o[w][0], 32);
+        memcpy(&L->h[w], &rng->h[w][0], 32);
+    }
+}
+
+static inline void lanes_save(const lanes *L, tandem_rng *rng) {
+    for (unsigned w = 0; w < 4; w++) {
+        memcpy(&rng->o[w][0], &L->o[w], 32);
+        memcpy(&rng->h[w][0], &L->h[w], 32);
+    }
+}
+
+/* Two blocks, 32 bytes of the row, optionally mapped to floats. */
+static inline void store_pair(u32x8 b, char *dst, store_mode mode) {
+    if (mode == STORE_F32) {
+        f32x8 f = __builtin_convertvector(b >> 8, f32x8) * 0x1p-24f;
+        memcpy(dst, &f, 32);
+    } else if (mode == STORE_F64) {
+        u64x4_avx2 w;
+        memcpy(&w, &b, 32);
+        /* x86 has no unsigned 64-bit to double conversion before AVX-512. The value is below 2^53,
+           so splitting it at bit 32 and adding the halves to 2^84 and 2^52 is exact. */
+        u64x4_avx2 x = w >> 11, hi = (x >> 32) | 0x4530000000000000u, lo = (x & 0xffffffffu) | 0x4330000000000000u;
+        f64x4 fh, fl;
+        memcpy(&fh, &hi, 32);
+        memcpy(&fl, &lo, 32);
+        f64x4 f = ((fh - (0x1p84 + 0x1p52)) + fl) * 0x1p-53;
+        memcpy(dst, &f, 32);
+    } else {
+        memcpy(dst, &b, 32);
+    }
+}
+
+/* The row in stream order: lane l owns bytes 16 l to 16 l + 15, so word w of lane l goes to
+ * word 4 l + w. Interleaving the four word vectors by lane does it. */
+static inline void lanes_store(const lanes *L, char *dst, store_mode mode) {
+    u32x8 ab_lo = __builtin_shufflevector(L->o[0], L->o[1], 0, 8, 1, 9, 2, 10, 3, 11);
+    u32x8 cd_lo = __builtin_shufflevector(L->o[2], L->o[3], 0, 8, 1, 9, 2, 10, 3, 11);
+    u32x8 ab_hi = __builtin_shufflevector(L->o[0], L->o[1], 4, 12, 5, 13, 6, 14, 7, 15);
+    u32x8 cd_hi = __builtin_shufflevector(L->o[2], L->o[3], 4, 12, 5, 13, 6, 14, 7, 15);
+    store_pair(__builtin_shufflevector(ab_lo, cd_lo, 0, 1, 8, 9, 2, 3, 10, 11), dst, mode);
+    store_pair(__builtin_shufflevector(ab_lo, cd_lo, 4, 5, 12, 13, 6, 7, 14, 15), dst + 32, mode);
+    store_pair(__builtin_shufflevector(ab_hi, cd_hi, 0, 1, 8, 9, 2, 3, 10, 11), dst + 64, mode);
+    store_pair(__builtin_shufflevector(ab_hi, cd_hi, 4, 5, 12, 13, 6, 7, 14, 15), dst + 96, mode);
+}
+#endif /* TANDEM_AVX2_PASS */
+
+#ifdef TANDEM_AVX2_PASS
+#define RUN_ROWS run_rows_avx2
+#define NORMAL_BLOCK_F64 normal_block_f64_avx2
+#define NORMAL_BLOCK_F32 normal_block_f32_avx2
+#else
+#define RUN_ROWS run_rows_base
+#define NORMAL_BLOCK_F64 normal_block_f64_base
+#define NORMAL_BLOCK_F32 normal_block_f32_base
+#endif
+
+#ifndef TANDEM_AVX2_PASS
 /* ---- Rows ------------------------------------------------------------------------------ */
 
 static inline unsigned log2k(uint32_t K) {
@@ -323,11 +523,12 @@ static inline unsigned log2k(uint32_t K) {
     while ((K >> s) > 1u) s++;
     return s;
 }
+#endif
 
 /* Produce rows [row, row + nrows) in stream order, 128 bytes each, into `out`, or only move
  * the cache when out is NULL. Stepping forward inside the cached group costs one T per row;
  * any other jump reseeds the group. Afterwards the cache holds the last row produced. */
-static void run_rows(tandem_rng *rng, uint64_t row, size_t nrows, char *out, store_mode mode) {
+static void RUN_ROWS(tandem_rng *rng, uint64_t row, size_t nrows, char *out, store_mode mode) {
     unsigned shift = log2k(rng->K);
     uint64_t mask = rng->K - 1u, at = rng->row;
     int live = rng->cached != 0;
@@ -367,6 +568,168 @@ static void run_rows(tandem_rng *rng, uint64_t row, size_t nrows, char *out, sto
     lanes_save(&L, rng);
     rng->row = at;
     rng->cached = 1u;
+}
+
+
+NOINLINE static void NORMAL_BLOCK_F64(const double *restrict u, double *restrict z, size_t m) {
+#if defined(__clang__)
+#pragma clang loop interleave_count(8)
+#endif
+    for (size_t j = 0; j < m; j++) {
+        double a = u[2u * j], b = u[2u * j + 1u];
+
+        /* 1 - a = mant 2^k with mant in [sqrt(1/2), sqrt(2)) from the bits: shifting the
+         * exponent field by the bits of sqrt(1/2) makes the mantissa rollover pick k. */
+        double x = 1.0 - a, mant;
+        uint64_t bits, ix;
+        memcpy(&bits, &x, 8);
+        ix = bits + 0x00095f6200000000u;
+        double nk = (double)(1023 - (int64_t)(ix >> 52)); /* -k */
+        ix = (ix & 0x000fffffffffffffu) + 0x3fe6a09e00000000u;
+        memcpy(&mant, &ix, 8);
+        double s = (mant - 1.0) / (mant + 1.0), zz = s * s;
+        double p = FMA(zz, FMA(zz, FMA(zz, FMA(zz, FMA(zz, FMA(zz, 0.08312363319426472,
+                   0.09070001083303751), 0.11111433317907482), 0.14285712049336274),
+                   0.2000000000566491), 0.33333333333331017), 1.0);
+        /* -2 ln(1 - a) = 2 nk ln 2 - 4 s p, with ln 2 split so that nk * ln2_hi is exact. */
+        double r = SQRT(FMA(nk, 3.816429394731813e-10, FMA(nk, 1.3862943607382476, (s * -4.0) * p)));
+
+        /* Nearest quarter turn q, and the angle left over in [-pi/4, pi/4]. */
+        int64_t q = (int64_t)(b * 4.0 + 0.5);
+        double f = FMA(-(double)q, 0.25, b), th = f * 6.283185307179586, w = th * th;
+        double hs = FMA(w, FMA(w, FMA(w, FMA(w, FMA(w, 1.5914650986900946e-10,
+                    -2.5051097984389413e-08), 2.755731600073921e-06), -0.00019841269836630226),
+                    0.008333333333330813), -0.16666666666666669);
+        double hc = FMA(w, FMA(w, FMA(w, FMA(w, FMA(w, 2.0665708703855164e-09,
+                    -2.7555858522576447e-07), 2.480158263811954e-05), -0.0013888888882156126),
+                    0.04166666666663108), -0.4999999999999997);
+        double sn = th * FMA(w, hs, 1.0), cs = FMA(w, hc, 1.0);
+
+        /* Rotate by q quarter turns with bit operations: odd q swaps the two, bit 1 of q
+         * negates the sine, and bit 1 of q + 1 negates the cosine. */
+        uint64_t qu = (uint64_t)q, sm = (uint64_t)0 - (qu & 1u), sb, cb, xb, yb;
+        memcpy(&sb, &sn, 8);
+        memcpy(&cb, &cs, 8);
+        xb = (sb & sm) | (cb & ~sm);
+        yb = (cb & sm) | (sb & ~sm);
+        xb ^= ((qu + 1u) << 62) & 0x8000000000000000u;
+        yb ^= (qu << 62) & 0x8000000000000000u;
+        double cx, sx;
+        memcpy(&cx, &xb, 8);
+        memcpy(&sx, &yb, 8);
+        z[2u * j] = r * cx;
+        z[2u * j + 1u] = r * sx;
+    }
+}
+
+NOINLINE static void NORMAL_BLOCK_F32(const float *restrict u, float *restrict z, size_t m) {
+#if defined(__clang__)
+#pragma clang loop interleave_count(8)
+#endif
+    for (size_t j = 0; j < m; j++) {
+        float a = u[2u * j], b = u[2u * j + 1u];
+
+        float x = 1.0f - a, mant;
+        uint32_t bits, ix;
+        memcpy(&bits, &x, 4);
+        ix = bits + 0x004afb0du;
+        float nk = (float)(127 - (int32_t)(ix >> 23)); /* -k */
+        ix = (ix & 0x007fffffu) + 0x3f3504f3u;
+        memcpy(&mant, &ix, 4);
+        float s = (mant - 1.0f) / (mant + 1.0f), zz = s * s;
+        float p = FMAF(zz, FMAF(zz, FMAF(zz, 0.14275366f, 0.20000061f), 0.33333334f), 1.0f);
+        float r = SQRTF(FMAF(nk, 2.857213530660374e-06f, FMAF(nk, 1.38629150390625f, (s * -4.0f) * p)));
+
+        int32_t q = (int32_t)(b * 4.0f + 0.5f);
+        float f = FMAF(-(float)q, 0.25f, b);
+        /* 2 pi as a float pair, so that the angle is good to the last bit of the float. */
+        float th = FMAF(f, -1.7484555e-7f, f * 6.2831855f), w = th * th;
+        float hs = FMAF(w, FMAF(w, FMAF(w, 2.72499e-06f, -0.00019840087f), 0.008333332f),
+                        -0.16666667f);
+        float hc = FMAF(w, FMAF(w, FMAF(w, 2.4463761e-05f, -0.0013887589f), 0.04166665f), -0.5f);
+        float sn = th * FMAF(w, hs, 1.0f), cs = FMAF(w, hc, 1.0f);
+
+        uint32_t qu = (uint32_t)q, sm = (uint32_t)0 - (qu & 1u), sb, cb, xb, yb;
+        memcpy(&sb, &sn, 4);
+        memcpy(&cb, &cs, 4);
+        xb = (sb & sm) | (cb & ~sm);
+        yb = (cb & sm) | (sb & ~sm);
+        xb ^= ((qu + 1u) << 30) & 0x80000000u;
+        yb ^= (qu << 30) & 0x80000000u;
+        float cx, sx;
+        memcpy(&cx, &xb, 4);
+        memcpy(&sx, &yb, 4);
+        z[2u * j] = r * cx;
+        z[2u * j + 1u] = r * sx;
+    }
+}
+
+#undef RUN_ROWS
+#undef NORMAL_BLOCK_F64
+#undef NORMAL_BLOCK_F32
+
+#ifdef TANDEM_AVX2_PASS
+#undef lanes
+#undef lanes_load
+#undef lanes_save
+#undef lanes_T
+#undef lanes_seed
+#undef lanes_store
+#endif
+
+#if defined(TANDEM_AVX2) && !defined(TANDEM_AVX2_PASS)
+#define TANDEM_AVX2_PASS 1
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("avx2,fma"))), apply_to = function)
+#else
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+#endif
+#include "tandem.c"
+#if defined(__clang__)
+#pragma clang attribute pop
+#else
+#pragma GCC pop_options
+#endif
+#undef TANDEM_AVX2_PASS
+
+/* A build for AVX2 and FMA needs no check, and the base copy is then dead code. */
+#if defined(__AVX2__) && defined(__FMA__)
+static int have_avx2(void) { return 1; }
+#else
+static int have_avx2(void) { return __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma"); }
+#endif
+#endif
+
+#ifndef TANDEM_AVX2_PASS
+static void run_rows(tandem_rng *rng, uint64_t row, size_t nrows, char *out, store_mode mode) {
+#ifdef TANDEM_AVX2
+    if (have_avx2()) {
+        run_rows_avx2(rng, row, nrows, out, mode);
+        return;
+    }
+#endif
+    run_rows_base(rng, row, nrows, out, mode);
+}
+
+static void normal_block_f64(const double *restrict u, double *restrict z, size_t m) {
+#ifdef TANDEM_AVX2
+    if (have_avx2()) {
+        normal_block_f64_avx2(u, z, m);
+        return;
+    }
+#endif
+    normal_block_f64_base(u, z, m);
+}
+
+static void normal_block_f32(const float *restrict u, float *restrict z, size_t m) {
+#ifdef TANDEM_AVX2
+    if (have_avx2()) {
+        normal_block_f32_avx2(u, z, m);
+        return;
+    }
+#endif
+    normal_block_f32_base(u, z, m);
 }
 
 static inline void load_row(tandem_rng *rng, uint64_t row) {
@@ -661,148 +1024,6 @@ void tandem_fill_u64_below(tandem_rng *rng, uint64_t *out, size_t len, uint64_t 
     }
 }
 
-/* ---- Public: normals --------------------------------------------------------------------- */
-
-/* Box-Muller without libm in the loop, so that the compiler vectorizes a block of pairs. A
- * pair (a, b) gives r = sqrt(-2 ln(1 - a)) and the normals r cos(2 pi b) and r sin(2 pi b),
- * cos first.
- *
- * ln(1 - a): 1 - a is exact and in (0, 1]. Split it as m 2^e with m in [sqrt(1/2), sqrt(2)) by
- * its exponent bits, then ln m = 2 s (1 + z/3 + z^2/5 + ...) with s = (m - 1) / (m + 1) and
- * z = s^2 <= 0.0295, a short series that keeps the relative error near the last bit even for
- * a close to 0.
- *
- * cos and sin of 2 pi b: b - q/4 for the nearest quarter turn q is exact, so the angle in
- * [-pi/4, pi/4] needs no range reduction. Taylor series give cos and sin there, and the
- * quarter turn is a swap and sign change. */
-#if defined(__clang__)
-#pragma STDC FP_CONTRACT OFF
-#endif
-
-/* Every multiply-add of the normal loop is an explicit fused multiply-add, so that every
- * compiler and target gives the same bits. On hardware without a fused instruction fma() is a
- * correct but slow library call that the compiler cannot vectorize: build with -mfma on x86 (the
- * Makefile does). Plain products and sums are never contracted, because the loop is built with
- * contraction off. */
-#define FMA(x, y, z) fma((x), (y), (z))
-#define FMAF(x, y, z) fmaf((x), (y), (z))
-
-/* Compilers may fuse or inline differently per call site. One out-of-line body for each
- * precision keeps the scalar draws and the fills bit identical. */
-#if defined(__clang__)
-#define NOINLINE __attribute__((noinline))
-#elif defined(__GNUC__)
-#define NOINLINE __attribute__((noinline, optimize("no-math-errno", "fp-contract=off")))
-#else
-#define NOINLINE
-#endif
-
-/* sqrt may set errno on a negative argument, which keeps it a library call on glibc and stops
- * the loop from vectorizing. The argument is never negative here, so the plain instruction is
- * right. Clang gets the intrinsic, and GCC the same through no-math-errno above. */
-#if defined(__clang__) && defined(__has_builtin)
-#if __has_builtin(__builtin_elementwise_sqrt)
-#define SQRT(x) __builtin_elementwise_sqrt(x)
-#define SQRTF(x) __builtin_elementwise_sqrt(x)
-#endif
-#endif
-#ifndef SQRT
-#define SQRT(x) sqrt(x)
-#define SQRTF(x) sqrtf(x)
-#endif
-NOINLINE static void normal_block_f64(const double *restrict u, double *restrict z, size_t m) {
-#if defined(__clang__)
-#pragma clang loop interleave_count(8)
-#endif
-    for (size_t j = 0; j < m; j++) {
-        double a = u[2u * j], b = u[2u * j + 1u];
-
-        /* 1 - a = mant 2^k with mant in [sqrt(1/2), sqrt(2)) from the bits: shifting the
-         * exponent field by the bits of sqrt(1/2) makes the mantissa rollover pick k. */
-        double x = 1.0 - a, mant;
-        uint64_t bits, ix;
-        memcpy(&bits, &x, 8);
-        ix = bits + 0x00095f6200000000u;
-        double nk = (double)(1023 - (int64_t)(ix >> 52)); /* -k */
-        ix = (ix & 0x000fffffffffffffu) + 0x3fe6a09e00000000u;
-        memcpy(&mant, &ix, 8);
-        double s = (mant - 1.0) / (mant + 1.0), zz = s * s;
-        double p = FMA(zz, FMA(zz, FMA(zz, FMA(zz, FMA(zz, FMA(zz, 0.08312363319426472,
-                   0.09070001083303751), 0.11111433317907482), 0.14285712049336274),
-                   0.2000000000566491), 0.33333333333331017), 1.0);
-        /* -2 ln(1 - a) = 2 nk ln 2 - 4 s p, with ln 2 split so that nk * ln2_hi is exact. */
-        double r = SQRT(FMA(nk, 3.816429394731813e-10, FMA(nk, 1.3862943607382476, (s * -4.0) * p)));
-
-        /* Nearest quarter turn q, and the angle left over in [-pi/4, pi/4]. */
-        int64_t q = (int64_t)(b * 4.0 + 0.5);
-        double f = FMA(-(double)q, 0.25, b), th = f * 6.283185307179586, w = th * th;
-        double hs = FMA(w, FMA(w, FMA(w, FMA(w, FMA(w, 1.5914650986900946e-10,
-                    -2.5051097984389413e-08), 2.755731600073921e-06), -0.00019841269836630226),
-                    0.008333333333330813), -0.16666666666666669);
-        double hc = FMA(w, FMA(w, FMA(w, FMA(w, FMA(w, 2.0665708703855164e-09,
-                    -2.7555858522576447e-07), 2.480158263811954e-05), -0.0013888888882156126),
-                    0.04166666666663108), -0.4999999999999997);
-        double sn = th * FMA(w, hs, 1.0), cs = FMA(w, hc, 1.0);
-
-        /* Rotate by q quarter turns with bit operations: odd q swaps the two, bit 1 of q
-         * negates the sine, and bit 1 of q + 1 negates the cosine. */
-        uint64_t qu = (uint64_t)q, sm = (uint64_t)0 - (qu & 1u), sb, cb, xb, yb;
-        memcpy(&sb, &sn, 8);
-        memcpy(&cb, &cs, 8);
-        xb = (sb & sm) | (cb & ~sm);
-        yb = (cb & sm) | (sb & ~sm);
-        xb ^= ((qu + 1u) << 62) & 0x8000000000000000u;
-        yb ^= (qu << 62) & 0x8000000000000000u;
-        double cx, sx;
-        memcpy(&cx, &xb, 8);
-        memcpy(&sx, &yb, 8);
-        z[2u * j] = r * cx;
-        z[2u * j + 1u] = r * sx;
-    }
-}
-
-NOINLINE static void normal_block_f32(const float *restrict u, float *restrict z, size_t m) {
-#if defined(__clang__)
-#pragma clang loop interleave_count(8)
-#endif
-    for (size_t j = 0; j < m; j++) {
-        float a = u[2u * j], b = u[2u * j + 1u];
-
-        float x = 1.0f - a, mant;
-        uint32_t bits, ix;
-        memcpy(&bits, &x, 4);
-        ix = bits + 0x004afb0du;
-        float nk = (float)(127 - (int32_t)(ix >> 23)); /* -k */
-        ix = (ix & 0x007fffffu) + 0x3f3504f3u;
-        memcpy(&mant, &ix, 4);
-        float s = (mant - 1.0f) / (mant + 1.0f), zz = s * s;
-        float p = FMAF(zz, FMAF(zz, FMAF(zz, 0.14275366f, 0.20000061f), 0.33333334f), 1.0f);
-        float r = SQRTF(FMAF(nk, 2.857213530660374e-06f, FMAF(nk, 1.38629150390625f, (s * -4.0f) * p)));
-
-        int32_t q = (int32_t)(b * 4.0f + 0.5f);
-        float f = FMAF(-(float)q, 0.25f, b);
-        /* 2 pi as a float pair, so that the angle is good to the last bit of the float. */
-        float th = FMAF(f, -1.7484555e-7f, f * 6.2831855f), w = th * th;
-        float hs = FMAF(w, FMAF(w, FMAF(w, 2.72499e-06f, -0.00019840087f), 0.008333332f),
-                        -0.16666667f);
-        float hc = FMAF(w, FMAF(w, FMAF(w, 2.4463761e-05f, -0.0013887589f), 0.04166665f), -0.5f);
-        float sn = th * FMAF(w, hs, 1.0f), cs = FMAF(w, hc, 1.0f);
-
-        uint32_t qu = (uint32_t)q, sm = (uint32_t)0 - (qu & 1u), sb, cb, xb, yb;
-        memcpy(&sb, &sn, 4);
-        memcpy(&cb, &cs, 4);
-        xb = (sb & sm) | (cb & ~sm);
-        yb = (cb & sm) | (sb & ~sm);
-        xb ^= ((qu + 1u) << 30) & 0x80000000u;
-        yb ^= (qu << 30) & 0x80000000u;
-        float cx, sx;
-        memcpy(&cx, &xb, 4);
-        memcpy(&sx, &yb, 4);
-        z[2u * j] = r * cx;
-        z[2u * j + 1u] = r * sx;
-    }
-}
-
 void tandem_normal2_f64(tandem_rng *rng, double out[2]) {
     double u[2];
     u[0] = tandem_next_f64(rng);
@@ -895,3 +1116,5 @@ void tandem_fork(tandem_rng *parent, tandem_rng *children, uint64_t n) {
         children[i] = child(parent, b, DOMAIN_FORK, (uint32_t)(i >> 1), (unsigned)(i & 1u));
     parent->pos = (b + 1u) << 7;
 }
+
+#endif /* TANDEM_AVX2_PASS */
