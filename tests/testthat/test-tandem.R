@@ -62,9 +62,15 @@ test_that("fills agree with the Julia dumps", {
   expect_identical(tandem_rbits(tandem_from_key(k1234, 0, 8), 16384, 32), u32k8 %% 2^32)
   u8 <- dump("seed42_K32_u8.bin", "integer", 1)
   expect_identical(tandem_rbits(tandem(42), 8192, 8), u8 %% 256)
-  u16 <- dump("seed42_K32_f16bits.bin", "integer", 2) %% 2^16
-  r <- tandem_rbits(tandem(42), 8, 16)
-  expect_length(r, 8)
+  # The Float16 dump holds (raw >> 5) * 2^-11 of each 16-bit word, exact in half precision.
+  f16 <- dump("seed42_K32_f16bits.bin", "integer", 2) %% 2^16
+  e <- f16 %/% 1024
+  m <- f16 %% 1024
+  half <- ifelse(e == 0, m * 2^-24, (1024 + m) * 2^(e - 25))
+  expect_identical(tandem_rbits(tandem(42), 4096, 16) %/% 32 / 2048, half)
+  # The low bits: 16-bit words are the halves of 32-bit words, low half first.
+  w <- tandem_rbits(tandem(42), 64, 32)
+  expect_identical(tandem_rbits(tandem(42), 128, 16), as.vector(rbind(w %% 65536, w %/% 65536)))
   expect_identical(tandem_rbool(tandem(42), 4096), dump("seed42_K32_bool.bin", "integer", 1) == 1)
 })
 
