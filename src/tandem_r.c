@@ -7,7 +7,6 @@
 #include <R_ext/Rdynload.h>
 #include <R_ext/Random.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "tandem.h"
@@ -453,16 +452,6 @@ SEXP R_tandem_normal_hash(void) {
     return mkString(text);
 }
 
-/* The C library's strtod rounds correctly, R's parser can be one ulp off where long double is
- * not wider than double. Internal, used by tests to read bit exact fixtures. */
-SEXP R_tandem_strtod(SEXP text) {
-    R_xlen_t len = xlength(text);
-    SEXP out = PROTECT(allocVector(REALSXP, len));
-    for (R_xlen_t i = 0; i < len; i++) REAL(out)[i] = strtod(CHAR(STRING_ELT(text, i)), NULL);
-    UNPROTECT(1);
-    return out;
-}
-
 /* The exponential counterpart, hashing the bytes of tandem-c's tests/test_exponential_bits.c. */
 SEXP R_tandem_exponential_hash(void) {
     enum { N = 1000000 };
@@ -623,7 +612,6 @@ static const R_CallMethodDef calls[] = {
     {"R_tandem_below", (DL_FUNC)&R_tandem_below, 4},
     {"R_tandem_rnorm", (DL_FUNC)&R_tandem_rnorm, 2},
     {"R_tandem_normal_hash", (DL_FUNC)&R_tandem_normal_hash, 0},
-    {"R_tandem_strtod", (DL_FUNC)&R_tandem_strtod, 1},
     {"R_tandem_rexp",(DL_FUNC)&R_tandem_rexp, 3},
     {"R_tandem_exponential_hash", (DL_FUNC)&R_tandem_exponential_hash, 0},
     {"R_tandem_split", (DL_FUNC)&R_tandem_split, 2},

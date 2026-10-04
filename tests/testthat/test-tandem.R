@@ -285,11 +285,18 @@ test_that("random access of 64-bit words matches the Julia dump", {
 })
 
 
-# Fixtures from tandem-c's tests/cross_fill_below.h and cross_normal.h, which tandem-c generates
-# from the CUDA port's core.hpp (tools/gen_cross_fixtures.R converts them). Every case starts
-# from tandem(42) at an unaligned bit position, 1 or 12345 for the fills. The bounded ranges
-# above 2^31 and 2^63 reject about half of the draws, so they cover the fallback stream.
+# Fixtures from tandem-c's tests/cross_fill_below.h, cross_normal.h and cross_exponential.h,
+# which tandem-c generates from the CUDA port's core.hpp (tools/gen_cross_fixtures.R converts
+# them). Every case starts from tandem(42), many at unaligned bit positions. The bounded range
+# 2^31 + 2^30 + 1 rejects about a quarter of the draws, so it covers the fallback stream.
 cross <- jsonlite::fromJSON(test_path("data", "cross_bounded.json"), simplifyVector = FALSE)
+# Doubles from the 16 hex digits of their bit pattern, most significant first.
+from_bits <- function(h) {
+  h <- unlist(h)
+  hex <- substring(paste(h, collapse = ""), seq(1, by = 2, length.out = 8 * length(h)),
+                   seq(2, by = 2, length.out = 8 * length(h)))
+  readBin(as.raw(strtoi(hex, 16L)), "double", length(h), endian = "big")
+}
 at_start <- function(start) {
   rng <- tandem(42)
   tandem_set_position(rng, as.numeric(start))
@@ -328,15 +335,15 @@ test_that("sample_int is the bounded fill on 1..max, as sample.int", {
   expect_identical(tandem_sample_int(tandem(1), 1, 1), 1L)
 })
 
-test_that("normals match the CUDA core", {
+test_that("normals are bit identical to the CUDA core", {
   rng <- after_bit()
-  expect_equal(tandem_rnorm(rng, 128), unlist(cross$normal), tolerance = 1e-12)
+  expect_identical(tandem_rnorm(rng, 128), from_bits(cross$normal))
   expect_identical(tandem_position(rng), as.numeric(cross$normal_end_pos))
 })
 
 test_that("an odd count of normals still consumes whole pairs", {
   rng <- after_bit()
-  expect_equal(tandem_rnorm(rng, 127), unlist(cross$normal)[1:127], tolerance = 1e-12)
+  expect_identical(tandem_rnorm(rng, 127), from_bits(cross$normal)[1:127])
   expect_identical(tandem_position(rng), as.numeric(cross$normal_end_pos))
 })
 
@@ -367,7 +374,7 @@ test_that("normal fills are bit identical to tandem-c's recorded hash", {
 test_that("exponentials are bit identical to tandem-c's fixture from the CUDA core", {
   for (case in cross$exponential) {
     rng <- at_start(case$start)
-    expect_identical(tandem_rexp(rng, 64), .Call(tandemrng:::R_tandem_strtod, unlist(case$want)))
+    expect_identical(tandem_rexp(rng, 64), from_bits(case$want))
     expect_identical(tandem_position(rng), as.numeric(case$end_pos))
   }
 })

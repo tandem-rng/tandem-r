@@ -15,19 +15,26 @@ cases <- function(text, name) {
   })
 }
 
-normals <- function(text, name) {
-  body <- sub("\\n\\};.*$", "", sub(paste0(".*", name, "\\[(2 \\* )?CROSS_NORMAL_COUNT\\] = \\{"), "", text))
-  as.numeric(sub("f$", "", strsplit(gsub("\\s+", "", body), ",")[[1]]))
+# Doubles as 16 hex digits of their bit pattern, so that the tests compare bits and need no
+# decimal parser. R's parser can miss the correctly rounded double by one ulp where long double is
+# not wider than double. jsonlite parses with the C library's strtod, which rounds correctly.
+bits <- function(text) {
+  x <- jsonlite::parse_json(paste0("[", paste(text, collapse = ","), "]"), simplifyVector = TRUE)
+  apply(matrix(as.character(writeBin(x, raw(), endian = "big")), 8), 2, paste, collapse = "")
 }
 
-# Only the double table. R has no single precision fill, and the C test pins the floats. The values
-# stay text, since R's own parser can miss the correctly rounded double by one ulp.
+normals <- function(text, name) {
+  body <- sub("\\n\\};.*$", "", sub(paste0(".*", name, "\\[(2 \\* )?CROSS_NORMAL_COUNT\\] = \\{"), "", text))
+  bits(strsplit(gsub("\\s+", "", body), ",")[[1]])
+}
+
+# Only the double tables. R has no single precision fill, and the C test pins the floats.
 exponentials <- function(text) {
   body <- sub("\\n\\};.*$", "", sub(".*CROSS_EXPONENTIAL\\[\\] = \\{", "", text))
   m <- regmatches(body, gregexpr("\\{[0-9]+ull,[^u]*u\\}", body))[[1]]
   lapply(m, function(s) {
     nums <- regmatches(s, gregexpr("[0-9]+(\\.[0-9]+)?(e[-+]?[0-9]+)?", s))[[1]]
-    list(start = nums[1], want = nums[2:(length(nums) - 1)], end_pos = nums[length(nums)])
+    list(start = nums[1], want = bits(nums[2:(length(nums) - 1)]), end_pos = nums[length(nums)])
   })
 }
 
