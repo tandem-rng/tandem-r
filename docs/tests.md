@@ -1,0 +1,28 @@
+# Tests
+
+`pixi run test` runs `tests/testthat/test-tandem.R`. It checks:
+
+- Every specification vector (`vectors.json`) and the stream dumps in `tests/testthat/data`.
+- Bounded integers, normals, and exponentials against tandem-c fixtures, built by
+  `tools/gen_cross_fixtures.R`, and against its recorded hashes.
+- The base R hook, serialization, `callr`, and forked `parallel::mclapply()` workers.
+- Fills cut at any element equal the whole fill.
+
+`tests/testthat/test-tandem.R` checks every vector of the specification
+(`tests/testthat/vectors.json`, a copy of the spec repository's file), compares fills with
+reference stream dumps in `tests/testthat/data`, and checks the base R hook, including that
+saving `.Random.seed`, drawing, restoring and redrawing repeats, across the buffer edge. It also checks
+that generators survive `saveRDS()`/`readRDS()`, `serialize()`, a `callr` child process and
+forked `parallel::mclapply()` workers at their current position, and compares 64-bit words
+with `k1234_K32_u64.bin` in both result types. Random access is checked against the
+matching fill at several positions and chunk lengths. Bounded integers and normals are
+compared with tandem-c's fixtures, generated from `core.hpp` and converted to
+`tests/testthat/data/cross_bounded.json` by `tools/gen_cross_fixtures.R`: integer ranges that reject
+about half of the draws, the stream position after them, and 128 normals. A bounded fill cut at
+an arbitrary element equals the whole fill at an unaligned start with rejections, the word width
+changes at `max = 2^32 + 1`, and a hash of 10^7 normals in both precisions matches tandem-c's
+recorded value, which pins the bits on every compiler CI builds with. Exponentials are compared
+bit for bit with tandem-c's fixture, also from `core.hpp`, at five start positions, unaligned ones
+included, and with tandem-c's recorded hash of 10^6 doubles and 10^6 floats from each of those
+starts. A cut fill equals the whole fill, an empty fill leaves the position alone, and 10^7
+exponentials have the first four moments and the Kolmogorov-Smirnov statistic of Exp(1).

@@ -1,8 +1,26 @@
-# Notes
+# API
 
-Detail moved out of the README. The README has the short form.
+- `tandem(seed)`, `tandem_from_key()`: a generator. Seeds, positions, indices, and purposes are
+  doubles below 2^53, or decimal strings for the full range. `tandem()` with no seed reads
+  `/dev/urandom`.
+- `tandem_runif`, `tandem_rsingle`, `tandem_rbool`: Float64, Float32, and bit draws.
+- `tandem_rbits(rng, n, bits)`: 8, 16, 32, or 64-bit words. 64-bit words are `bit64::integer64`
+  if `bit64` is installed, else 16-digit hex strings.
+- `tandem_below`, `tandem_sample_int`: bounded integers on `0..max-1` and `1..max`.
+- `tandem_rnorm`, `tandem_rexp`: Box-Muller normals and `-log(1 - u) / rate` exponentials.
+- `tandem_split`, `tandem_fork`, `tandem_sub`: child streams.
+- `tandem_at`: elements of the next fill, without drawing, for `"u32"`, `"u64"`, `"f32"`, `"f64"`.
+- `tandem_key`, `tandem_position`, `tandem_set_position`, `tandem_chunk_length`, `tandem_state`,
+  `tandem_restore`: transport form.
+- `RNGkind("user-supplied")`: Tandem as the base R generator. `.Random.seed` holds its state, so
+  `set.seed()` and restoring the seed repeat the draws. `rexp()` still uses R's algorithm.
+- Serialization: a generator survives `saveRDS()`, `serialize()`, and parallel workers at its
+  position. Copies are independent, so give each worker its own `tandem_split()`.
+- Parallel use: element `i` of a fill is draw `i`, so ranks or workers that start at their first
+  element, or draw from `split(task)`, reproduce a serial run. See
+  [Appendix B](https://github.com/tandem-rng/spec/blob/main/SPEC.md#appendix-b-parallel-decomposition-non-normative).
 
-## Use
+## Examples
 
 ```r
 library(tandemrng)
@@ -100,50 +118,3 @@ n)` advancing `rng`. Copies made by serialization are independent of each other 
 original: two workers that receive the same generator draw the same values, so give each its
 own with `tandem_split()`. `tandem_state()` and `tandem_restore()` convert to and from a plain
 list for use outside R's own formats.
-
-## Install
-
-```r
-# install.packages("remotes")
-remotes::install_github("tandem-rng/tandem-r")
-```
-
-The build needs a C99 compiler. For development, `pixi install` creates an environment with
-R and the tooling, `pixi run document` regenerates `man/` and `NAMESPACE`, `pixi run test`
-runs the tests and `pixi run check` runs `R CMD check --as-cran`.
-
-## Tests
-
-`tests/testthat/test-tandem.R` checks every vector of the specification
-(`tests/testthat/vectors.json`, a copy of the spec repository's file), compares fills with
-reference stream dumps in `tests/testthat/data`, and checks the base R hook, including that
-saving `.Random.seed`, drawing, restoring and redrawing repeats, across the buffer edge. It also checks
-that generators survive `saveRDS()`/`readRDS()`, `serialize()`, a `callr` child process and
-forked `parallel::mclapply()` workers at their current position, and compares 64-bit words
-with `k1234_K32_u64.bin` in both result types. Random access is checked against the
-matching fill at several positions and chunk lengths. Bounded integers and normals are
-compared with tandem-c's fixtures, generated from `core.hpp` and converted to
-`tests/testthat/data/cross_bounded.json` by `tools/gen_cross_fixtures.R`: integer ranges that reject
-about half of the draws, the stream position after them, and 128 normals. A bounded fill cut at
-an arbitrary element equals the whole fill at an unaligned start with rejections, the word width
-changes at `max = 2^32 + 1`, and a hash of 10^7 normals in both precisions matches tandem-c's
-recorded value, which pins the bits on every compiler CI builds with. Exponentials are compared
-bit for bit with tandem-c's fixture, also from `core.hpp`, at five start positions, unaligned ones
-included, and with tandem-c's recorded hash of 10^6 doubles and 10^6 floats from each of those
-starts. A cut fill equals the whole fill, an empty fill leaves the position alone, and 10^7
-exponentials have the first four moments and the Kolmogorov-Smirnov statistic of Exp(1).
-
-`tools/sync_c.sh` refreshes the vendored C sources.
-
-## Speed
-
-Apple M4, one thread, `pixi run bench`, 2^22 doubles, minimum of five runs. The normals rows
-count 8 bytes per normal or exponential:
-
-The Tandem fill rows are the C fill plus R's allocation of the result. The user-supplied hook returns
-one double per call, so `runif` through it runs at R's call rate. The hook fills a buffer of
-1024 doubles at a time and keeps its state in `.Random.seed`. A draw checks one 64-bit token
-against the buffer's. The cold
-paths, a rebuild and the move to the next buffer, are kept out of line. `pixi run bench`
-installs the package first, so it measures the
-current sources.
