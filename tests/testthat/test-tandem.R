@@ -359,3 +359,15 @@ test_that("empty bounded fills leave an unaligned position alone", {
     }
   }
 })
+
+test_that("a bounded fill cut at any element equals the whole fill, rejections included", {
+  # 2^31 + 2^30 + 1 rejects about a quarter of the draws; the start is unaligned.
+  for (max in c(3221225473, 1000000000000)) {
+    whole <- tandem_below(at_start(12345), 200, max)
+    for (k in c(0, 1, 2, 31, 32, 33, 100, 199, 200)) {
+      rng <- at_start(12345)
+      cut <- c(tandem_below(rng, k, max), tandem_below(rng, 200 - k, max))
+      expect_identical(cut, whole)
+    }
+  }
+})
