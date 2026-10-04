@@ -82,6 +82,8 @@ exponential rows count 8 bytes per value.
 | `tandem_rexp(rng, n)` | 6.2 |
 | `rexp(n)`, Mersenne-Twister | 0.4 |
 
+Longer notes on use, install, tests, and speed are in [docs/notes.md](docs/notes.md).
+
 ## AI assistance
 
 This port was written with the help of large language models under human
