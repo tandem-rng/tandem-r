@@ -342,3 +342,14 @@ test_that("pair j of normals is Box-Muller of uniform draws 2j and 2j + 1", {
   z <- as.vector(rbind(r * cos(2 * pi * b), r * sin(2 * pi * b)))
   expect_equal(tandem_rnorm(tandem(42), 20), z, tolerance = 1e-12)
 })
+
+test_that("empty bounded fills leave an unaligned position alone", {
+  for (f in list(tandem_below, tandem_sample_int)) {
+    for (max in c(6, 4294967297)) {
+      rng <- tandem(42)
+      tandem_rbool(rng, 1)
+      expect_length(f(rng, 0, max), 0)
+      expect_identical(tandem_position(rng), 1)
+    }
+  }
+})

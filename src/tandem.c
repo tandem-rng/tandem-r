@@ -621,6 +621,7 @@ COLD static uint64_t retry_u64(const uint32_t key[4], uint32_t K, uint64_t n, ui
 
 void tandem_fill_u32_below(tandem_rng *rng, uint32_t *out, size_t len, uint32_t n) {
     uint32_t key[4], K = rng->K;
+    if (len == 0) return; /* the plain fill would align the position */
     memcpy(key, rng->key, 16);
     tandem_fill_u32(rng, out, len);
     for (size_t i = 0; i < len; i++) {
@@ -638,6 +639,7 @@ void tandem_fill_u32_below(tandem_rng *rng, uint32_t *out, size_t len, uint32_t 
 
 void tandem_fill_u64_below(tandem_rng *rng, uint64_t *out, size_t len, uint64_t n) {
     uint32_t key[4], K = rng->K;
+    if (len == 0) return;
     memcpy(key, rng->key, 16);
     tandem_fill_u64(rng, out, len);
     for (size_t i = 0; i < len; i++) {
