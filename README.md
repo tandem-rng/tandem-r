@@ -4,8 +4,8 @@
 
 R package `tandemrng` for [Tandem8x32](https://github.com/tandem-rng/spec), a noncryptographic
 pseudorandom number generator built to be fast on CPUs and GPUs alike. It wraps a vendored
-copy of the reference C implementation and produces the stream the specification defines,
-bit for bit.
+copy of the reference C implementation, tandem-c at commit 8f1f057, and produces the stream
+the specification defines, bit for bit.
 
 ## Use
 
@@ -70,8 +70,9 @@ port's `core.hpp`, so every port returns the same values. `tandem_below()` retur
 uniform on `0..(max - 1)`, and `tandem_sample_int()` adds 1, so it is uniform on `1..max` like
 `sample.int(max, n, replace = TRUE)`.
 Element `i` maps stream word `i` by Lemire's multiply-and-reject method, and a rejected word
-retries on a fallback generator derived by index `i`, so a fill uses exactly `n` words. It reads
-32-bit words, or 64-bit words for `max` above `2^32 - 1`. Normals come in
+retries on a fallback generator derived by the global draw index, the aligned start position over
+the word width plus `i`, so a fill uses exactly `n` words and a fill cut at any element equals
+the whole fill. It reads 32-bit words, or 64-bit words for `max` above `2^32`. Normals come in
 Box-Muller pairs: elements `2j` and `2j + 1` are the cosine and sine halves from the Float64
 draws `2j` and `2j + 1`, and an odd count still consumes both draws of its last pair.
 
@@ -122,20 +123,23 @@ with `k1234_K32_u64.bin` in both result types. Random access is checked against 
 matching fill at several positions and chunk lengths. Bounded integers and normals are
 compared with tandem-c's fixtures, generated from `core.hpp` and converted to
 `tests/testthat/data/cross_bounded.json` by `tools/gen_cross_fixtures.R`: integer ranges that reject
-about half of the draws, the stream position after them, and 128 normals. CI fails when
+about half of the draws, the stream position after them, and 128 normals. A bounded fill cut at
+an arbitrary element equals the whole fill at an unaligned start with rejections, the word width
+changes at `max = 2^32 + 1`, and a hash of 10^7 normals in both precisions matches tandem-c's
+recorded value, which pins the bits on every compiler CI builds with. CI fails when
 the vendored C sources in `src/` or the vectors drift from upstream. `tools/sync_c.sh` refreshes the C sources.
 
 ## Speed
 
-Apple M4, one thread, `pixi run bench`, 2^24 doubles, minimum of seven runs. The normals rows
+Apple M4, one thread, `pixi run bench`, 2^22 doubles, minimum of five runs. The normals rows
 count 8 bytes per normal:
 
 | | GiB/s |
 |---|---|
-| `tandem_runif(rng, n)` | 11.4 |
-| `runif(n)` with Tandem as the user-supplied generator | 2.0 |
-| `runif(n)`, Mersenne-Twister | 2.2 |
-| `tandem_rnorm(rng, n)` | 4.0 |
+| `tandem_runif(rng, n)` | 15.6 |
+| `runif(n)` with Tandem as the user-supplied generator | 2.2 |
+| `runif(n)`, Mersenne-Twister | 2.4 |
+| `tandem_rnorm(rng, n)` | 5.2 |
 | `rnorm(n)`, Mersenne-Twister with inversion | 0.5 |
 
 The first and fourth rows are the C fill plus R's allocation of the result. The user-supplied hook returns

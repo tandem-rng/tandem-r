@@ -34,9 +34,10 @@ from the same generator.
 \code{sample.int(max, n, replace = TRUE)} does. It is the C bounded fill plus 1. \code{tandem_below()}
 returns the fill itself, on \verb{0..(max - 1)}, which is the form the other ports return. Element
 \code{i} maps stream word \code{i} by Lemire's multiply-and-reject method, and a rejected word retries
-on a fallback generator derived from the generator by index \code{i}, so a fill uses exactly \code{n}
-words whatever is rejected. It reads 32-bit words when \code{max} is below \code{2^32} and 64-bit words
-above. The result is an integer vector when every value is at most \code{2^31 - 1} and a double
+on a fallback generator derived from the generator by the global draw index, the aligned start
+position over the word width plus \code{i}, so a fill uses exactly \code{n} words whatever is rejected
+and a fill cut into pieces equals the whole fill. It reads 32-bit words when \code{max} is at most
+\code{2^32} and 64-bit words above. The result is an integer vector when every value is at most \code{2^31 - 1} and a double
 vector otherwise.
 
 \code{tandem_rnorm()} returns \code{n} standard normals by the Box-Muller transform. Pair \code{j}, elements

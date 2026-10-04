@@ -349,6 +349,21 @@ test_that("pair j of normals is Box-Muller of uniform draws 2j and 2j + 1", {
   expect_equal(tandem_rnorm(tandem(42), 20), z, tolerance = 1e-12)
 })
 
+test_that("the word width follows the range, 32 bits up to 2^32 inclusive", {
+  # A range of 2^32 never rejects, so the value is the 32-bit word itself.
+  expect_identical(tandem_below(tandem(42), 50, 4294967296), tandem_rbits(tandem(42), 50, 32))
+  expect_identical(tandem_sample_int(tandem(42), 50, 4294967296),
+                   tandem_rbits(tandem(42), 50, 32) + 1)
+  # 2^32 + 1 reads 64-bit words, which advance the position twice as far.
+  rng <- tandem(42)
+  tandem_below(rng, 50, 4294967297)
+  expect_identical(tandem_position(rng), 50 * 64)
+})
+
+test_that("normal fills are bit identical to tandem-c's recorded hash", {
+  expect_identical(.Call(tandemrng:::R_tandem_normal_hash), "9414e1315e2653be")
+})
+
 test_that("empty bounded fills leave an unaligned position alone", {
   for (f in list(tandem_below, tandem_sample_int)) {
     for (max in c(6, 4294967297)) {

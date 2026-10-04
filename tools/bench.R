@@ -1,10 +1,10 @@
-# Throughput of 2^24 doubles: tandem_runif, base runif with Tandem as the user-supplied
+# Throughput of 2^22 doubles: tandem_runif, base runif with Tandem as the user-supplied
 # generator, base runif with Mersenne-Twister, tandem_rnorm and base rnorm (inversion).
 library(tandemrng)
 
-n <- 2^24
+n <- 2^22
 bytes <- 8 * n
-best <- function(f, runs = 7) {
+best <- function(f, runs = 5) {
   f()
   min(vapply(seq_len(runs), function(i) system.time(f())[["elapsed"]], numeric(1)))
 }

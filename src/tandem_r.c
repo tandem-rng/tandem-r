@@ -383,10 +383,13 @@ SEXP R_tandem_below(SEXP rng, SEXP n, SEXP max, SEXP one) {
         tandem_fill_u32_below(g, (uint32_t *)x, len, (uint32_t)range);
         if (base)
             for (size_t i = 0; i < len; i++) x[i]++;
-    } else if (range <= UINT32_MAX) {
+    } else if (range <= (uint64_t)1 << 32) {
         uint32_t *u = (uint32_t *)R_alloc(len ? len : 1, sizeof *u);
         out = PROTECT(allocVector(REALSXP, (R_xlen_t)len));
-        tandem_fill_u32_below(g, u, len, (uint32_t)range);
+        /* Width 32 holds for range 2^32 too, where Lemire never rejects and the word is the
+         * value. The C fill takes a uint32_t bound and cannot express 2^32. */
+        if (range == (uint64_t)1 << 32) tandem_fill_u32(g, u, len);
+        else tandem_fill_u32_below(g, u, len, (uint32_t)range);
         for (size_t i = 0; i < len; i++) REAL(out)[i] = (double)u[i] + base;
     } else {
         uint64_t *u = (uint64_t *)R_alloc(len ? len : 1, sizeof *u);
@@ -407,6 +410,29 @@ SEXP R_tandem_rnorm(SEXP rng, SEXP n) {
     sync_position(rng, g);
     UNPROTECT(1);
     return out;
+}
+
+/* The bytes of the normal fills tandem-c hashes in tests/test_normal_bits.c, hashed here to show
+ * that this build, with R's compiler and flags, produces the same bits. Internal, used by tests. */
+SEXP R_tandem_normal_hash(void) {
+    enum { PAIRS = 1000000 };
+    const uint64_t starts[] = {0, 1, 77, 12345, (uint64_t)1 << 30};
+    uint64_t h = 0xcbf29ce484222325ull;
+    double *d = (double *)R_alloc(2 * PAIRS, sizeof *d);
+    float *f = (float *)R_alloc(2 * PAIRS, sizeof *f);
+    char text[17];
+    for (size_t i = 0; i < sizeof starts / sizeof starts[0]; i++) {
+        tandem_rng g = tandem_seed(2026, 7, 0);
+        const unsigned char *b = (const unsigned char *)d;
+        tandem_set_position(&g, starts[i]);
+        tandem_fill_normal_f64(&g, d, 2 * PAIRS - 1);
+        for (size_t k = 0; k < (2 * PAIRS - 1) * sizeof *d; k++) h = (h ^ b[k]) * 0x100000001b3ull;
+        tandem_fill_normal_f32(&g, f, 2 * PAIRS - 1);
+        b = (const unsigned char *)f;
+        for (size_t k = 0; k < (2 * PAIRS - 1) * sizeof *f; k++) h = (h ^ b[k]) * 0x100000001b3ull;
+    }
+    snprintf(text, sizeof text, "%016llx", (unsigned long long)h);
+    return mkString(text);
 }
 
 /* ---- Derived generators ----------------------------------------------------------------- */
@@ -546,6 +572,7 @@ static const R_CallMethodDef calls[] = {
     {"R_tandem_rbool", (DL_FUNC)&R_tandem_rbool, 2},
     {"R_tandem_below", (DL_FUNC)&R_tandem_below, 4},
     {"R_tandem_rnorm", (DL_FUNC)&R_tandem_rnorm, 2},
+    {"R_tandem_normal_hash", (DL_FUNC)&R_tandem_normal_hash, 0},
     {"R_tandem_split", (DL_FUNC)&R_tandem_split, 2},
     {"R_tandem_sub", (DL_FUNC)&R_tandem_sub, 2},
     {"R_tandem_fork", (DL_FUNC)&R_tandem_fork, 2},
