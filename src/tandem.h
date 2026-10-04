@@ -112,6 +112,16 @@ void tandem_fill_u64_below(tandem_rng *rng, uint64_t *out, size_t len, uint64_t 
 void tandem_fill_normal_f64(tandem_rng *rng, double *out, size_t n);
 void tandem_fill_normal_f32(tandem_rng *rng, float *out, size_t n);
 
+/* Standard exponentials -ln(1 - u) from one uniform u each, f64 from f64 uniforms in double and
+ * f32 from f32 uniforms in float, with the polynomial logarithm of the normals and no libm call.
+ * They match tandem-cuda bit for bit on the host and the device and are not part of the
+ * specification (Appendix A). Element i of a fill comes from uniform i of the plain fill, so a
+ * fill equals n scalar draws and consumes n uniforms. */
+double tandem_exponential_f64(tandem_rng *rng);
+float tandem_exponential_f32(tandem_rng *rng);
+void tandem_fill_exponential_f64(tandem_rng *rng, double *out, size_t n);
+void tandem_fill_exponential_f32(tandem_rng *rng, float *out, size_t n);
+
 #ifdef TANDEM_OPENMP_TARGET
 /* Fills in device memory by an OpenMP target region, the same values as the host fills. out
  * points to memory of the given OpenMP device, for example from omp_target_alloc. The functions

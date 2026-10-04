@@ -6,9 +6,10 @@
 #include <string.h>
 #if defined(__x86_64__) && !defined(TANDEM_NO_SIMD) && !defined(TANDEM_NO_AVX2) &&              \
     (defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 12))
-/* A second copy of the row loop and the normal loop is compiled for AVX2 and FMA, and chosen at
- * run time, so a plain -O2 build is fast on current x86 and still runs on older x86. The file
- * includes itself once with TANDEM_AVX2_PASS defined to make it, so it must keep its name. */
+/* A second copy of the row loop and the normal and exponential loops is compiled for AVX2 and
+ * FMA, and chosen at run time, so a plain -O2 build is fast on current x86 and still runs on
+ * older x86. The file includes itself once with TANDEM_AVX2_PASS defined to make it, so it must
+ * keep its name. */
 #define TANDEM_AVX2 1
 #include <immintrin.h>
 #endif
@@ -118,11 +119,49 @@ void tandem_block(const uint32_t key[4], uint64_t c, uint32_t j, uint32_t out[4]
  * precision keeps the scalar draws and the fills bit identical. */
 #if defined(__clang__)
 #define NOINLINE __attribute__((noinline))
+#define FP_INLINE static inline __attribute__((always_inline))
 #elif defined(__GNUC__)
 #define NOINLINE __attribute__((noinline, optimize("no-math-errno", "fp-contract=off")))
+/* GCC inlines into a NOINLINE body only a function with the same optimize options. */
+#define FP_INLINE                                                                                  \
+    static inline __attribute__((always_inline, optimize("no-math-errno", "fp-contract=off")))
 #else
 #define NOINLINE
+#define FP_INLINE static inline
 #endif
+
+/* -2 ln x for x in (0, 1], the logarithm of the normals and the exponentials. x = mant 2^k with
+ * mant in [sqrt(1/2), sqrt(2)) from the bits: shifting the exponent field by the bits of
+ * sqrt(1/2) makes the mantissa rollover pick k. Then -2 ln x = 2 nk ln 2 - 4 s p, with ln 2
+ * split so that nk * ln2_hi is exact. No plain product feeds a plain sum, so contraction cannot
+ * change the bits. */
+FP_INLINE double neg2_log_f64(double x) {
+    double mant;
+    uint64_t bits, ix;
+    memcpy(&bits, &x, 8);
+    ix = bits + 0x00095f6200000000u;
+    double nk = (double)(1023 - (int64_t)(ix >> 52)); /* -k */
+    ix = (ix & 0x000fffffffffffffu) + 0x3fe6a09e00000000u;
+    memcpy(&mant, &ix, 8);
+    double s = (mant - 1.0) / (mant + 1.0), zz = s * s;
+    double p = FMA(zz, FMA(zz, FMA(zz, FMA(zz, FMA(zz, FMA(zz, 0.08312363319426472,
+               0.09070001083303751), 0.11111433317907482), 0.14285712049336274),
+               0.2000000000566491), 0.33333333333331017), 1.0);
+    return FMA(nk, 3.816429394731813e-10, FMA(nk, 1.3862943607382476, (s * -4.0) * p));
+}
+
+FP_INLINE float neg2_log_f32(float x) {
+    float mant;
+    uint32_t bits, ix;
+    memcpy(&bits, &x, 4);
+    ix = bits + 0x004afb0du;
+    float nk = (float)(127 - (int32_t)(ix >> 23)); /* -k */
+    ix = (ix & 0x007fffffu) + 0x3f3504f3u;
+    memcpy(&mant, &ix, 4);
+    float s = (mant - 1.0f) / (mant + 1.0f), zz = s * s;
+    float p = FMAF(zz, FMAF(zz, FMAF(zz, 0.14275366f, 0.20000061f), 0.33333334f), 1.0f);
+    return FMAF(nk, 2.857213530660374e-06f, FMAF(nk, 1.38629150390625f, (s * -4.0f) * p));
+}
 
 /* sqrt may set errno on a negative argument, which keeps it a library call on glibc and stops
  * the loop from vectorizing. The argument is never negative here, so the plain instruction is
@@ -509,10 +548,14 @@ static inline void lanes_store(const lanes *L, char *dst, store_mode mode) {
 #define RUN_ROWS run_rows_avx2
 #define NORMAL_BLOCK_F64 normal_block_f64_avx2
 #define NORMAL_BLOCK_F32 normal_block_f32_avx2
+#define EXPONENTIAL_BLOCK_F64 exponential_block_f64_avx2
+#define EXPONENTIAL_BLOCK_F32 exponential_block_f32_avx2
 #else
 #define RUN_ROWS run_rows_base
 #define NORMAL_BLOCK_F64 normal_block_f64_base
 #define NORMAL_BLOCK_F32 normal_block_f32_base
+#define EXPONENTIAL_BLOCK_F64 exponential_block_f64_base
+#define EXPONENTIAL_BLOCK_F32 exponential_block_f32_base
 #endif
 
 #ifndef TANDEM_AVX2_PASS
@@ -577,22 +620,7 @@ NOINLINE static void NORMAL_BLOCK_F64(const double *restrict u, double *restrict
 #endif
     for (size_t j = 0; j < m; j++) {
         double a = u[2u * j], b = u[2u * j + 1u];
-
-        /* 1 - a = mant 2^k with mant in [sqrt(1/2), sqrt(2)) from the bits: shifting the
-         * exponent field by the bits of sqrt(1/2) makes the mantissa rollover pick k. */
-        double x = 1.0 - a, mant;
-        uint64_t bits, ix;
-        memcpy(&bits, &x, 8);
-        ix = bits + 0x00095f6200000000u;
-        double nk = (double)(1023 - (int64_t)(ix >> 52)); /* -k */
-        ix = (ix & 0x000fffffffffffffu) + 0x3fe6a09e00000000u;
-        memcpy(&mant, &ix, 8);
-        double s = (mant - 1.0) / (mant + 1.0), zz = s * s;
-        double p = FMA(zz, FMA(zz, FMA(zz, FMA(zz, FMA(zz, FMA(zz, 0.08312363319426472,
-                   0.09070001083303751), 0.11111433317907482), 0.14285712049336274),
-                   0.2000000000566491), 0.33333333333331017), 1.0);
-        /* -2 ln(1 - a) = 2 nk ln 2 - 4 s p, with ln 2 split so that nk * ln2_hi is exact. */
-        double r = SQRT(FMA(nk, 3.816429394731813e-10, FMA(nk, 1.3862943607382476, (s * -4.0) * p)));
+        double r = SQRT(neg2_log_f64(1.0 - a));
 
         /* Nearest quarter turn q, and the angle left over in [-pi/4, pi/4]. */
         int64_t q = (int64_t)(b * 4.0 + 0.5);
@@ -628,17 +656,7 @@ NOINLINE static void NORMAL_BLOCK_F32(const float *restrict u, float *restrict z
 #endif
     for (size_t j = 0; j < m; j++) {
         float a = u[2u * j], b = u[2u * j + 1u];
-
-        float x = 1.0f - a, mant;
-        uint32_t bits, ix;
-        memcpy(&bits, &x, 4);
-        ix = bits + 0x004afb0du;
-        float nk = (float)(127 - (int32_t)(ix >> 23)); /* -k */
-        ix = (ix & 0x007fffffu) + 0x3f3504f3u;
-        memcpy(&mant, &ix, 4);
-        float s = (mant - 1.0f) / (mant + 1.0f), zz = s * s;
-        float p = FMAF(zz, FMAF(zz, FMAF(zz, 0.14275366f, 0.20000061f), 0.33333334f), 1.0f);
-        float r = SQRTF(FMAF(nk, 2.857213530660374e-06f, FMAF(nk, 1.38629150390625f, (s * -4.0f) * p)));
+        float r = SQRTF(neg2_log_f32(1.0f - a));
 
         int32_t q = (int32_t)(b * 4.0f + 0.5f);
         float f = FMAF(-(float)q, 0.25f, b);
@@ -664,9 +682,26 @@ NOINLINE static void NORMAL_BLOCK_F32(const float *restrict u, float *restrict z
     }
 }
 
+/* In place, z[j] = -ln(1 - z[j]) for uniforms z[j]. Halving -2 ln is exact. */
+NOINLINE static void EXPONENTIAL_BLOCK_F64(double *z, size_t m) {
+#if defined(__clang__)
+#pragma clang loop interleave_count(4)
+#endif
+    for (size_t j = 0; j < m; j++) z[j] = 0.5 * neg2_log_f64(1.0 - z[j]);
+}
+
+NOINLINE static void EXPONENTIAL_BLOCK_F32(float *z, size_t m) {
+#if defined(__clang__)
+#pragma clang loop interleave_count(4)
+#endif
+    for (size_t j = 0; j < m; j++) z[j] = 0.5f * neg2_log_f32(1.0f - z[j]);
+}
+
 #undef RUN_ROWS
 #undef NORMAL_BLOCK_F64
 #undef NORMAL_BLOCK_F32
+#undef EXPONENTIAL_BLOCK_F64
+#undef EXPONENTIAL_BLOCK_F32
 
 #ifdef TANDEM_AVX2_PASS
 #undef lanes
@@ -730,6 +765,26 @@ static void normal_block_f32(const float *restrict u, float *restrict z, size_t 
     }
 #endif
     normal_block_f32_base(u, z, m);
+}
+
+static void exponential_block_f64(double *z, size_t m) {
+#ifdef TANDEM_AVX2
+    if (have_avx2()) {
+        exponential_block_f64_avx2(z, m);
+        return;
+    }
+#endif
+    exponential_block_f64_base(z, m);
+}
+
+static void exponential_block_f32(float *z, size_t m) {
+#ifdef TANDEM_AVX2
+    if (have_avx2()) {
+        exponential_block_f32_avx2(z, m);
+        return;
+    }
+#endif
+    exponential_block_f32_base(z, m);
 }
 
 static inline void load_row(tandem_rng *rng, uint64_t row) {
@@ -1080,6 +1135,41 @@ void tandem_fill_normal_f32(tandem_rng *rng, float *out, size_t n) {
         pairs -= m;
     }
     if (n % 2u) *out = tandem_normal_f32(rng);
+}
+
+double tandem_exponential_f64(tandem_rng *rng) {
+    double e = tandem_next_f64(rng);
+    exponential_block_f64(&e, 1);
+    return e;
+}
+
+float tandem_exponential_f32(tandem_rng *rng) {
+    float e = tandem_next_f32(rng);
+    exponential_block_f32(&e, 1);
+    return e;
+}
+
+/* The uniforms go into the output in blocks that stay in L1 for the in-place map. */
+#define EXPONENTIAL_BLOCK 1024u
+
+void tandem_fill_exponential_f64(tandem_rng *rng, double *out, size_t n) {
+    while (n) {
+        size_t m = n < EXPONENTIAL_BLOCK ? n : EXPONENTIAL_BLOCK;
+        tandem_fill_f64(rng, out, m);
+        exponential_block_f64(out, m);
+        out += m;
+        n -= m;
+    }
+}
+
+void tandem_fill_exponential_f32(tandem_rng *rng, float *out, size_t n) {
+    while (n) {
+        size_t m = n < EXPONENTIAL_BLOCK ? n : EXPONENTIAL_BLOCK;
+        tandem_fill_f32(rng, out, m);
+        exponential_block_f32(out, m);
+        out += m;
+        n -= m;
+    }
 }
 
 /* ---- Public: random access and derived generators --------------------------------------- */
