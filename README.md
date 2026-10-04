@@ -127,15 +127,18 @@ the vendored C sources in `src/` or the vectors drift from upstream. `tools/sync
 
 ## Speed
 
-Apple M4, one thread, `pixi run bench`, 2^24 doubles, minimum of seven runs:
+Apple M4, one thread, `pixi run bench`, 2^24 doubles, minimum of seven runs. The normals rows
+count 8 bytes per normal:
 
 | | GiB/s |
 |---|---|
 | `tandem_runif(rng, n)` | 11.4 |
 | `runif(n)` with Tandem as the user-supplied generator | 2.0 |
 | `runif(n)`, Mersenne-Twister | 2.2 |
+| `tandem_rnorm(rng, n)` | 4.0 |
+| `rnorm(n)`, Mersenne-Twister with inversion | 0.5 |
 
-The first row is the C fill plus R's allocation of the result. The user-supplied hook returns
+The first and fourth rows are the C fill plus R's allocation of the result. The user-supplied hook returns
 one double per call, so `runif` through it runs at R's call rate. The hook fills a buffer of
 1024 doubles at a time and keeps its state in `.Random.seed`. A draw checks one 64-bit token
 against the buffer's. The cold

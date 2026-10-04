@@ -657,39 +657,149 @@ void tandem_fill_u64_below(tandem_rng *rng, uint64_t *out, size_t len, uint64_t 
 
 /* ---- Public: normals --------------------------------------------------------------------- */
 
-/* Compilers may turn cos and sin of one angle into a combined sincos call whose last bit differs
- * from the separate calls, and do so in some inlined copies only. One out-of-line body keeps
- * the scalar draws and the fills bit identical. */
+/* Box-Muller without libm in the loop, so that the compiler vectorizes a block of pairs. A
+ * pair (a, b) gives r = sqrt(-2 ln(1 - a)) and the normals r cos(2 pi b) and r sin(2 pi b),
+ * cos first.
+ *
+ * ln(1 - a): 1 - a is exact and in (0, 1]. Split it as m 2^e with m in [sqrt(1/2), sqrt(2)) by
+ * its exponent bits, then ln m = 2 s (1 + z/3 + z^2/5 + ...) with s = (m - 1) / (m + 1) and
+ * z = s^2 <= 0.0295, a short series that keeps the relative error near the last bit even for
+ * a close to 0.
+ *
+ * cos and sin of 2 pi b: b - q/4 for the nearest quarter turn q is exact, so the angle in
+ * [-pi/4, pi/4] needs no range reduction. Taylor series give cos and sin there, and the
+ * quarter turn is a swap and sign change. */
+#if defined(__clang__)
+#pragma STDC FP_CONTRACT OFF
+#endif
+
+/* One rounding per fused multiply-add where the hardware has it, plain operations otherwise.
+ * Contraction is off so that every build does the same arithmetic in the vector body and in
+ * the scalar remainder of a loop. */
+#if defined(__FP_FAST_FMA)
+#define FMA(x, y, z) fma((x), (y), (z))
+#else
+#define FMA(x, y, z) ((x) * (y) + (z))
+#endif
+#if defined(__FP_FAST_FMAF)
+#define FMAF(x, y, z) fmaf((x), (y), (z))
+#else
+#define FMAF(x, y, z) ((x) * (y) + (z))
+#endif
+
+/* Compilers may fuse or inline differently per call site. One out-of-line body for each
+ * precision keeps the scalar draws and the fills bit identical. */
 #if defined(__GNUC__) || defined(__clang__)
 #define NOINLINE __attribute__((noinline))
 #else
 #define NOINLINE
 #endif
 
-/* One radius and angle give two normals, the cos half first. The f32 radius is float. */
-NOINLINE static void box_muller2(double a, double b, double out[2]) {
-    double r = sqrt(-2.0 * log(1.0 - a)), t = 6.283185307179586 * b;
-    out[0] = r * cos(t);
-    out[1] = r * sin(t);
+NOINLINE static void normal_block_f64(const double *restrict u, double *restrict z, size_t m) {
+#if defined(__clang__)
+#pragma clang loop interleave_count(8)
+#endif
+    for (size_t j = 0; j < m; j++) {
+        double a = u[2u * j], b = u[2u * j + 1u];
+
+        /* 1 - a = mant 2^k with mant in [sqrt(1/2), sqrt(2)) from the bits: shifting the
+         * exponent field by the bits of sqrt(1/2) makes the mantissa rollover pick k. */
+        double x = 1.0 - a, mant;
+        uint64_t bits, ix;
+        memcpy(&bits, &x, 8);
+        ix = bits + 0x00095f6200000000u;
+        double nk = (double)(1023 - (int64_t)(ix >> 52)); /* -k */
+        ix = (ix & 0x000fffffffffffffu) + 0x3fe6a09e00000000u;
+        memcpy(&mant, &ix, 8);
+        double s = (mant - 1.0) / (mant + 1.0), zz = s * s;
+        double p = FMA(zz, FMA(zz, FMA(zz, FMA(zz, FMA(zz, FMA(zz, 0.08312363319426472,
+                   0.09070001083303751), 0.11111433317907482), 0.14285712049336274),
+                   0.2000000000566491), 0.33333333333331017), 1.0);
+        /* -2 ln(1 - a) = 2 nk ln 2 - 4 s p, with ln 2 split so that nk * ln2_hi is exact. */
+        double r = sqrt(FMA(nk, 1.3862943607382476, (s * -4.0) * p) + nk * 3.816429394731813e-10);
+
+        /* Nearest quarter turn q, and the angle left over in [-pi/4, pi/4]. */
+        int64_t q = (int64_t)(b * 4.0 + 0.5);
+        double f = FMA(-(double)q, 0.25, b), th = f * 6.283185307179586, w = th * th;
+        double hs = FMA(w, FMA(w, FMA(w, FMA(w, FMA(w, 1.5914650986900946e-10,
+                    -2.5051097984389413e-08), 2.755731600073921e-06), -0.00019841269836630226),
+                    0.008333333333330813), -0.16666666666666669);
+        double hc = FMA(w, FMA(w, FMA(w, FMA(w, FMA(w, 2.0665708703855164e-09,
+                    -2.7555858522576447e-07), 2.480158263811954e-05), -0.0013888888882156126),
+                    0.04166666666663108), -0.4999999999999997);
+        double sn = th * FMA(w, hs, 1.0), cs = FMA(w, hc, 1.0);
+
+        /* Rotate by q quarter turns with bit operations: odd q swaps the two, bit 1 of q
+         * negates the sine, and bit 1 of q + 1 negates the cosine. */
+        uint64_t qu = (uint64_t)q, sm = (uint64_t)0 - (qu & 1u), sb, cb, xb, yb;
+        memcpy(&sb, &sn, 8);
+        memcpy(&cb, &cs, 8);
+        xb = (sb & sm) | (cb & ~sm);
+        yb = (cb & sm) | (sb & ~sm);
+        xb ^= ((qu + 1u) << 62) & 0x8000000000000000u;
+        yb ^= (qu << 62) & 0x8000000000000000u;
+        double cx, sx;
+        memcpy(&cx, &xb, 8);
+        memcpy(&sx, &yb, 8);
+        z[2u * j] = r * cx;
+        z[2u * j + 1u] = r * sx;
+    }
 }
 
-/* The angle goes through double: a float angle 2 pi b is off by up to 2 pi b 2^-24, which the
- * device's sincospif does not suffer, and tandem-cuda's host path does the same. */
-NOINLINE static void box_muller2_f32(float a, float b, float out[2]) {
-    float r = sqrtf(-2.0f * logf(1.0f - a));
-    double t = 6.283185307179586 * (double)b;
-    out[0] = r * (float)cos(t);
-    out[1] = r * (float)sin(t);
+NOINLINE static void normal_block_f32(const float *restrict u, float *restrict z, size_t m) {
+#if defined(__clang__)
+#pragma clang loop interleave_count(8)
+#endif
+    for (size_t j = 0; j < m; j++) {
+        float a = u[2u * j], b = u[2u * j + 1u];
+
+        float x = 1.0f - a, mant;
+        uint32_t bits, ix;
+        memcpy(&bits, &x, 4);
+        ix = bits + 0x004afb0du;
+        float nk = (float)(127 - (int32_t)(ix >> 23)); /* -k */
+        ix = (ix & 0x007fffffu) + 0x3f3504f3u;
+        memcpy(&mant, &ix, 4);
+        float s = (mant - 1.0f) / (mant + 1.0f), zz = s * s;
+        float p = FMAF(zz, FMAF(zz, FMAF(zz, 0.14275366f, 0.20000061f), 0.33333334f), 1.0f);
+        float r = sqrtf(FMAF(nk, 1.38629150390625f, (s * -4.0f) * p) + nk * 2.857213530660374e-06f);
+
+        int32_t q = (int32_t)(b * 4.0f + 0.5f);
+        float f = FMAF(-(float)q, 0.25f, b);
+        /* 2 pi as a float pair, so that the angle is good to the last bit of the float. */
+        float th = FMAF(f, -1.7484555e-7f, f * 6.2831855f), w = th * th;
+        float hs = FMAF(w, FMAF(w, FMAF(w, 2.72499e-06f, -0.00019840087f), 0.008333332f),
+                        -0.16666667f);
+        float hc = FMAF(w, FMAF(w, FMAF(w, 2.4463761e-05f, -0.0013887589f), 0.04166665f), -0.5f);
+        float sn = th * FMAF(w, hs, 1.0f), cs = FMAF(w, hc, 1.0f);
+
+        uint32_t qu = (uint32_t)q, sm = (uint32_t)0 - (qu & 1u), sb, cb, xb, yb;
+        memcpy(&sb, &sn, 4);
+        memcpy(&cb, &cs, 4);
+        xb = (sb & sm) | (cb & ~sm);
+        yb = (cb & sm) | (sb & ~sm);
+        xb ^= ((qu + 1u) << 30) & 0x80000000u;
+        yb ^= (qu << 30) & 0x80000000u;
+        float cx, sx;
+        memcpy(&cx, &xb, 4);
+        memcpy(&sx, &yb, 4);
+        z[2u * j] = r * cx;
+        z[2u * j + 1u] = r * sx;
+    }
 }
 
 void tandem_normal2_f64(tandem_rng *rng, double out[2]) {
-    double a = tandem_next_f64(rng);
-    box_muller2(a, tandem_next_f64(rng), out);
+    double u[2];
+    u[0] = tandem_next_f64(rng);
+    u[1] = tandem_next_f64(rng);
+    normal_block_f64(u, out, 1);
 }
 
 void tandem_normal2_f32(tandem_rng *rng, float out[2]) {
-    float a = tandem_next_f32(rng);
-    box_muller2_f32(a, tandem_next_f32(rng), out);
+    float u[2];
+    u[0] = tandem_next_f32(rng);
+    u[1] = tandem_next_f32(rng);
+    normal_block_f32(u, out, 1);
 }
 
 double tandem_normal_f64(tandem_rng *rng) {
@@ -712,38 +822,28 @@ float tandem_normal_f32(tandem_rng *rng) {
 
 void tandem_fill_normal_f64(tandem_rng *rng, double *out, size_t n) {
     double u[2u * NORMAL_BLOCK];
-    size_t pairs = n / 2u + n % 2u;
+    size_t pairs = n / 2u;
     while (pairs) {
         size_t m = pairs < NORMAL_BLOCK ? pairs : NORMAL_BLOCK;
         tandem_fill_f64(rng, u, 2u * m);
-        for (size_t j = 0; j < m; j++) {
-            double z[2];
-            box_muller2(u[2u * j], u[2u * j + 1u], z);
-            out[0] = z[0];
-            if (n == 1u) break;
-            out[1] = z[1];
-            out += 2, n -= 2u;
-        }
+        normal_block_f64(u, out, m);
+        out += 2u * m;
         pairs -= m;
     }
+    if (n % 2u) *out = tandem_normal_f64(rng);
 }
 
 void tandem_fill_normal_f32(tandem_rng *rng, float *out, size_t n) {
     float u[2u * NORMAL_BLOCK];
-    size_t pairs = n / 2u + n % 2u;
+    size_t pairs = n / 2u;
     while (pairs) {
         size_t m = pairs < NORMAL_BLOCK ? pairs : NORMAL_BLOCK;
         tandem_fill_f32(rng, u, 2u * m);
-        for (size_t j = 0; j < m; j++) {
-            float z[2];
-            box_muller2_f32(u[2u * j], u[2u * j + 1u], z);
-            out[0] = z[0];
-            if (n == 1u) break;
-            out[1] = z[1];
-            out += 2, n -= 2u;
-        }
+        normal_block_f32(u, out, m);
+        out += 2u * m;
         pairs -= m;
     }
+    if (n % 2u) *out = tandem_normal_f32(rng);
 }
 
 /* ---- Public: random access and derived generators --------------------------------------- */
