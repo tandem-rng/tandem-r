@@ -318,6 +318,41 @@ SEXP R_tandem_rbits64(SEXP rng, SEXP n, SEXP hex) {
     return out;
 }
 
+/* Random access: element i of the fill that would start at the current position, without
+ * moving it. type is 0 for u32, 1 for u64, 2 for f32 and 3 for f64. */
+SEXP R_tandem_at(SEXP rng, SEXP type, SEXP index, SEXP hex) {
+    const tandem_rng *g = unwrap(rng);
+    int t = asInteger(type);
+    SEXP out;
+    R_xlen_t len = TYPEOF(index) == STRSXP ? 1 : XLENGTH(index);
+    uint64_t *v = (uint64_t *)R_alloc(len ? (size_t)len : 1, sizeof *v);
+    if (TYPEOF(index) == STRSXP) {
+        v[0] = parse_u64(index, "i");
+    } else if (TYPEOF(index) == REALSXP || TYPEOF(index) == INTSXP) {
+        for (R_xlen_t k = 0; k < len; k++) {
+            double d = TYPEOF(index) == REALSXP ? REAL(index)[k] : (double)INTEGER(index)[k];
+            if (!(d >= 0 && d < TWO53) || d != (double)(uint64_t)d)
+                error("i must hold integer-valued numbers in [0, 2^53), or be a decimal string");
+            v[k] = (uint64_t)d;
+        }
+    } else {
+        error("i must be a numeric vector or a decimal string");
+    }
+    if (t == 1) {
+        for (R_xlen_t k = 0; k < len; k++) v[k] = tandem_at_u64(g, v[k]);
+        return asLogical(hex) ? u64_hex(v, (size_t)len) : u64_integer64(v, (size_t)len);
+    }
+    out = PROTECT(allocVector(REALSXP, len));
+    for (R_xlen_t k = 0; k < len; k++) {
+        double x = t == 0 ? (double)tandem_at_u32(g, v[k])
+                 : t == 2 ? (double)tandem_at_f32(g, v[k])
+                          : tandem_at_f64(g, v[k]);
+        REAL(out)[k] = x;
+    }
+    UNPROTECT(1);
+    return out;
+}
+
 SEXP R_tandem_rbool(SEXP rng, SEXP n) {
     size_t len = parse_n(n);
     SEXP out = PROTECT(allocVector(LGLSXP, (R_xlen_t)len));
@@ -437,6 +472,7 @@ static const R_CallMethodDef calls[] = {
     {"R_tandem_rsingle", (DL_FUNC)&R_tandem_rsingle, 2},
     {"R_tandem_rbits", (DL_FUNC)&R_tandem_rbits, 3},
     {"R_tandem_rbits64", (DL_FUNC)&R_tandem_rbits64, 3},
+    {"R_tandem_at", (DL_FUNC)&R_tandem_at, 4},
     {"R_tandem_rbool", (DL_FUNC)&R_tandem_rbool, 2},
     {"R_tandem_split", (DL_FUNC)&R_tandem_split, 2},
     {"R_tandem_sub", (DL_FUNC)&R_tandem_sub, 2},

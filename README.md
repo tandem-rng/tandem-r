@@ -18,6 +18,7 @@ f <- tandem_rsingle(rng, 10)         # Float32 draws, as doubles
 w <- tandem_rbits(rng, 10, 32)       # unsigned 32-bit words, as doubles
 w64 <- tandem_rbits(rng, 10, 64)     # 64-bit words: integer64 with bit64, else hex strings
 b <- tandem_rbool(rng, 10)           # single stream bits
+x <- tandem_at(rng, "f64", c(0, 5, 1e6))  # elements of the next fill, without drawing
 worker <- tandem_split(rng, 7)       # by index, from the key alone
 kids <- tandem_fork(rng, 4)          # from the current block, parent moves on
 tandem_key(rng); tandem_position(rng); tandem_chunk_length(rng)
@@ -49,6 +50,10 @@ fit R integers. 64-bit words have no exact R type. With the suggested package `b
 installed, `bits = 64` returns a `bit64::integer64`, which holds each word as a signed two's
 complement value, so words from 2^63 on read as negative. Without `bit64` it returns a
 character vector of 16 lowercase hex digits per word, most significant digit first.
+
+`tandem_at(rng, type, i)` reads element `i` of the fill that would start at the current
+position, without moving the generator, for `"u32"`, `"u64"`, `"f32"` and `"f64"`. Elements
+count from 0, as in the specification. `i` may be a vector.
 
 ## Serialization
 
@@ -87,7 +92,8 @@ reference stream dumps in `tests/testthat/data`, and checks the base R hook, inc
 saving `.Random.seed`, drawing, restoring and redrawing repeats, across the buffer edge. It also checks
 that generators survive `saveRDS()`/`readRDS()`, `serialize()`, a `callr` child process and
 forked `parallel::mclapply()` workers at their current position, and compares 64-bit words
-with `k1234_K32_u64.bin` in both result types. CI fails when
+with `k1234_K32_u64.bin` in both result types. Random access is checked against the
+matching fill at several positions and chunk lengths. CI fails when
 the vendored C sources in `src/` or the vectors drift from upstream. `tools/sync_c.sh` refreshes the C sources.
 
 ## Speed

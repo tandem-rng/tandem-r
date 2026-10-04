@@ -143,6 +143,31 @@ bit64_available <- function() requireNamespace("bit64", quietly = TRUE)
 #' @export
 tandem_rbool <- function(rng, n) .Call(R_tandem_rbool, rng, as.double(n))
 
+#' Random access
+#'
+#' `tandem_at(rng, type, i)` returns element `i` of the fill that would start at the
+#' generator's current position, without moving the generator. Elements count from 0, as in
+#' the specification, so `tandem_at(rng, "f64", i)` equals `tandem_runif(rng, n)[i + 1]` for
+#' every `i < n`. The cost does not depend on `i`.
+#'
+#' @param rng A `tandem_rng` object.
+#' @param type One of `"u32"`, `"u64"`, `"f32"` or `"f64"`: unsigned words of 32 or 64 bits and
+#'   the Float32 and Float64 mappings of `tandem_rsingle()` and `tandem_runif()`.
+#' @param i Element indices, a numeric vector of integer values in `[0, 2^53)` or one string of
+#'   decimal digits for an index up to `2^64 - 1`.
+#' @return A double vector, as the matching draw returns. `"u64"` gives `bit64::integer64` or
+#'   hex strings, as `tandem_rbits(rng, n, 64)` does.
+#' @examples
+#' rng <- tandem(42)
+#' tandem_at(rng, "f64", c(0, 5, 1e6))
+#' identical(tandem_at(rng, "f64", 2), tandem_runif(rng, 3)[3])
+#' @export
+tandem_at <- function(rng, type, i) {
+  types <- c("u32", "u64", "f32", "f64")
+  type <- match(match.arg(type, types), types) - 1L
+  .Call(R_tandem_at, rng, type, i, !bit64_available())
+}
+
 #' Derived generators
 #'
 #' Children start at position 0 with the parent's `K`. `tandem_split()` derives child

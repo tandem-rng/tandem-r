@@ -239,3 +239,33 @@ test_that("a 64-bit word is two consecutive 32-bit words", {
   hex32 <- function(w) sprintf("%04x%04x", as.integer(w %/% 65536), as.integer(w %% 65536))
   expect_identical(w64, paste0(hex32(w32[c(2, 4, 6)]), hex32(w32[c(1, 3, 5)])))
 })
+
+test_that("random access equals the matching fill, anywhere in the stream", {
+  for (K in c(8, 32)) {
+    rng <- tandem_from_key(k1234, 0, K)
+    tandem_set_position(rng, 64 * 37)
+    idx <- c(0, 1, 2, 31, 32, 33, 1000, 2047)
+    at_pos <- tandem_position(rng)
+    fill <- function(f, ...) f(tandem_from_key(k1234, at_pos, K), 2048, ...)
+    expect_identical(tandem_at(rng, "f64", idx), fill(tandem_runif)[idx + 1])
+    expect_identical(tandem_at(rng, "f32", idx), fill(tandem_rsingle)[idx + 1])
+    expect_identical(tandem_at(rng, "u32", idx), fill(tandem_rbits, 32)[idx + 1])
+    expect_identical(tandem_position(rng), at_pos)
+  }
+  expect_identical(tandem_at(tandem(42), "f64", 3), tandem_runif(tandem(42), 4)[4])
+  expect_identical(tandem_at(tandem(42), "f64", "3"), tandem_at(tandem(42), "f64", 3))
+  expect_length(tandem_at(tandem(1), "u32", numeric()), 0)
+})
+
+test_that("random access of 64-bit words matches the Julia dump", {
+  rng <- tandem_from_key(k1234, 0, 32)
+  idx <- c(0, 1, 7, 100, 2047)
+  w <- tandem_at(rng, "u64", idx)
+  want <- tandem_rbits(tandem_from_key(k1234, 0, 32), 2048, 64)[idx + 1]
+  expect_identical(w, want)
+  testthat::local_mocked_bindings(bit64_available = function() FALSE)
+  hex <- tandem_at(rng, "u64", idx)
+  expect_type(hex, "character")
+  expect_identical(hex, tandem_rbits(tandem_from_key(k1234, 0, 32), 2048, 64)[idx + 1])
+})
+
