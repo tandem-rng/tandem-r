@@ -100,8 +100,8 @@ void tandem_fill_c64(tandem_rng *rng, double *out, size_t n);
 
 /* len bounded draws, as the parallel fills of tandem-cuda: element i maps draw i of
  * tandem_fill_u32 or tandem_fill_u64 and the fill consumes exactly len draws. A rejected draw is
- * retried on a fallback generator split(i) of sub(0x424c573332 or 0x424c573634) of the fill's
- * generator, so the values equal the scalar calls except where a draw is rejected, which has
+ * retried on a fallback generator split(g) of sub(0x424c573332 or 0x424c573634) of the fill's
+ * generator, where g is the global draw index, the aligned start position over 32 or 64 plus i, so the values equal the scalar calls except where a draw is rejected, which has
  * probability (2^32 mod n) / 2^32, or the 64-bit analogue. */
 void tandem_fill_u32_below(tandem_rng *rng, uint32_t *out, size_t len, uint32_t n);
 void tandem_fill_u64_below(tandem_rng *rng, uint64_t *out, size_t len, uint64_t n);
@@ -111,6 +111,16 @@ void tandem_fill_u64_below(tandem_rng *rng, uint64_t *out, size_t len, uint64_t 
  * both uniforms, 2 * ceil(n / 2) in all. */
 void tandem_fill_normal_f64(tandem_rng *rng, double *out, size_t n);
 void tandem_fill_normal_f32(tandem_rng *rng, float *out, size_t n);
+
+#ifdef TANDEM_OPENMP_TARGET
+/* Fills in device memory by an OpenMP target region, the same values as the host fills. out
+ * points to memory of the given OpenMP device, for example from omp_target_alloc. The functions
+ * are in tandem_target.c, built with the offload flags of your compiler. */
+void tandem_fill_u32_target(tandem_rng *rng, uint32_t *out, size_t n, int device);
+void tandem_fill_u64_target(tandem_rng *rng, uint64_t *out, size_t n, int device);
+void tandem_fill_f32_target(tandem_rng *rng, float *out, size_t n, int device);
+void tandem_fill_f64_target(tandem_rng *rng, double *out, size_t n, int device);
+#endif
 
 /* Random access: element i of the fill that would start here, without advancing. */
 uint32_t tandem_at_u32(const tandem_rng *rng, uint64_t i);

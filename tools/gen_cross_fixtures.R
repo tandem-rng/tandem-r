@@ -7,10 +7,11 @@ read <- function(f) paste(readLines(file.path(dir, f)), collapse = "\n")
 
 cases <- function(text, name) {
   body <- sub("\\};.*$", "", sub(paste0(".*", name, "\\[\\] = \\{"), "", text))
-  m <- regmatches(body, gregexpr("\\{[0-9]+u+l*,\\s*\\{[^}]*\\},\\s*[0-9]+u\\}", body))[[1]]
+  m <- regmatches(body, gregexpr("\\{[0-9]+ull,\\s*[0-9]+u+l*,\\s*\\{[^}]*\\},\\s*[0-9]+u\\}", body))[[1]]
   lapply(m, function(s) {
     nums <- regmatches(s, gregexpr("[0-9]+", s))[[1]]
-    list(n = nums[1], want = nums[2:(length(nums) - 1)], end_pos = nums[length(nums)])
+    list(start = nums[1], n = nums[2], want = nums[3:(length(nums) - 1)],
+         end_pos = nums[length(nums)])
   })
 }
 

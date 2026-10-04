@@ -582,8 +582,10 @@ uint64_t tandem_u64_below(tandem_rng *rng, uint64_t n) {
 
 /* Fills cannot know how many draws earlier elements rejected, so element i takes draw i of the
  * plain fill and consumes exactly one draw. A rejected draw retries with Lemire's rule on a
- * fallback generator, split(i) of sub(PURPOSE) of the fill's generator at position 0. The
- * constants are reserved for this and match tandem-cuda. The plain fill keeps the SIMD speed
+ * fallback generator, split(g) of sub(PURPOSE) of the fill's generator at position 0, where g
+ * is the global draw index: the aligned start position over the draw width, plus i. A fill cut
+ * anywhere then equals the whole fill. The constants are reserved for this and match
+ * tandem-cuda. The plain fill keeps the SIMD speed
  * and the pass over its output rarely leaves the common path. */
 #define PURPOSE_BELOW32 0x424c573332ull
 #define PURPOSE_BELOW64 0x424c573634ull
@@ -621,15 +623,17 @@ COLD static uint64_t retry_u64(const uint32_t key[4], uint32_t K, uint64_t n, ui
 
 void tandem_fill_u32_below(tandem_rng *rng, uint32_t *out, size_t len, uint32_t n) {
     uint32_t key[4], K = rng->K;
+    uint64_t first;
     if (len == 0) return; /* the plain fill would align the position */
     memcpy(key, rng->key, 16);
+    first = align_pos(rng->pos, 32) >> 5;
     tandem_fill_u32(rng, out, len);
     for (size_t i = 0; i < len; i++) {
         uint64_t m = (uint64_t)out[i] * n;
         if ((uint32_t)m < n) {
             uint32_t t = (0u - n) % n;
             if ((uint32_t)m < t) {
-                out[i] = retry_u32(key, K, n, t, i);
+                out[i] = retry_u32(key, K, n, t, first + i);
                 continue;
             }
         }
@@ -639,15 +643,17 @@ void tandem_fill_u32_below(tandem_rng *rng, uint32_t *out, size_t len, uint32_t 
 
 void tandem_fill_u64_below(tandem_rng *rng, uint64_t *out, size_t len, uint64_t n) {
     uint32_t key[4], K = rng->K;
+    uint64_t first;
     if (len == 0) return;
     memcpy(key, rng->key, 16);
+    first = align_pos(rng->pos, 64) >> 6;
     tandem_fill_u64(rng, out, len);
     for (size_t i = 0; i < len; i++) {
         uint64_t lo = out[i] * n;
         if (lo < n) {
             uint64_t t = (0u - n) % n;
             if (lo < t) {
-                out[i] = retry_u64(key, K, n, t, i);
+                out[i] = retry_u64(key, K, n, t, first + i);
                 continue;
             }
         }

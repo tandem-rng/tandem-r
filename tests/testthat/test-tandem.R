@@ -287,9 +287,14 @@ test_that("random access of 64-bit words matches the Julia dump", {
 
 # Fixtures from tandem-c's tests/cross_fill_below.h and cross_normal.h, which tandem-c generates
 # from the CUDA port's core.hpp (tools/gen_cross_fixtures.R converts them). Every case starts
-# from tandem(42) after one bit draw, which leaves the position unaligned. The bounded ranges
+# from tandem(42) at an unaligned bit position, 1 or 12345 for the fills. The bounded ranges
 # above 2^31 and 2^63 reject about half of the draws, so they cover the fallback stream.
 cross <- jsonlite::fromJSON(test_path("data", "cross_bounded.json"), simplifyVector = FALSE)
+at_start <- function(start) {
+  rng <- tandem(42)
+  tandem_set_position(rng, as.numeric(start))
+  rng
+}
 after_bit <- function() {
   rng <- tandem(42)
   tandem_rbool(rng, 1)
@@ -299,9 +304,10 @@ after_bit <- function() {
 test_that("bounded fills match the CUDA core", {
   # tandem_below draws 64-bit words only for ranges above 2^32 - 1, and the values must fit
   # doubles, so of the 64-bit cases only 10^12 applies.
-  for (cases in list(cross$fill_u32, cross$fill_u64[3])) {
+  tera <- Filter(function(case) case$n == "1000000000000", cross$fill_u64)
+  for (cases in list(cross$fill_u32, tera)) {
     for (case in cases) {
-      rng <- after_bit()
+      rng <- at_start(case$start)
       got <- tandem_below(rng, 64, case$n)
       expect_equal(as.numeric(got), as.numeric(unlist(case$want)))
       expect_identical(tandem_position(rng), as.numeric(case$end_pos))
@@ -311,7 +317,7 @@ test_that("bounded fills match the CUDA core", {
 
 test_that("sample_int is the bounded fill on 1..max, as sample.int", {
   for (case in cross$fill_u32) {
-    rng <- after_bit()
+    rng <- at_start(case$start)
     got <- tandem_sample_int(rng, 64, case$n)
     expect_equal(as.numeric(got), as.numeric(unlist(case$want)) + 1)
     expect_identical(tandem_position(rng), as.numeric(case$end_pos))
