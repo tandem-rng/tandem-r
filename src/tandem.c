@@ -679,28 +679,37 @@ void tandem_fill_u64_below(tandem_rng *rng, uint64_t *out, size_t len, uint64_t 
 #pragma STDC FP_CONTRACT OFF
 #endif
 
-/* One rounding per fused multiply-add where the hardware has it, plain operations otherwise.
- * Contraction is off so that every build does the same arithmetic in the vector body and in
- * the scalar remainder of a loop. */
-#if defined(__FP_FAST_FMA)
+/* Every multiply-add of the normal loop is an explicit fused multiply-add, so that every
+ * compiler and target gives the same bits. On hardware without a fused instruction fma() is a
+ * correct but slow library call that the compiler cannot vectorize: build with -mfma on x86 (the
+ * Makefile does). Plain products and sums are never contracted, because the loop is built with
+ * contraction off. */
 #define FMA(x, y, z) fma((x), (y), (z))
-#else
-#define FMA(x, y, z) ((x) * (y) + (z))
-#endif
-#if defined(__FP_FAST_FMAF)
 #define FMAF(x, y, z) fmaf((x), (y), (z))
-#else
-#define FMAF(x, y, z) ((x) * (y) + (z))
-#endif
 
 /* Compilers may fuse or inline differently per call site. One out-of-line body for each
  * precision keeps the scalar draws and the fills bit identical. */
-#if defined(__GNUC__) || defined(__clang__)
+#if defined(__clang__)
 #define NOINLINE __attribute__((noinline))
+#elif defined(__GNUC__)
+#define NOINLINE __attribute__((noinline, optimize("no-math-errno", "fp-contract=off")))
 #else
 #define NOINLINE
 #endif
 
+/* sqrt may set errno on a negative argument, which keeps it a library call on glibc and stops
+ * the loop from vectorizing. The argument is never negative here, so the plain instruction is
+ * right. Clang gets the intrinsic, and GCC the same through no-math-errno above. */
+#if defined(__clang__) && defined(__has_builtin)
+#if __has_builtin(__builtin_elementwise_sqrt)
+#define SQRT(x) __builtin_elementwise_sqrt(x)
+#define SQRTF(x) __builtin_elementwise_sqrt(x)
+#endif
+#endif
+#ifndef SQRT
+#define SQRT(x) sqrt(x)
+#define SQRTF(x) sqrtf(x)
+#endif
 NOINLINE static void normal_block_f64(const double *restrict u, double *restrict z, size_t m) {
 #if defined(__clang__)
 #pragma clang loop interleave_count(8)
@@ -722,7 +731,7 @@ NOINLINE static void normal_block_f64(const double *restrict u, double *restrict
                    0.09070001083303751), 0.11111433317907482), 0.14285712049336274),
                    0.2000000000566491), 0.33333333333331017), 1.0);
         /* -2 ln(1 - a) = 2 nk ln 2 - 4 s p, with ln 2 split so that nk * ln2_hi is exact. */
-        double r = sqrt(FMA(nk, 1.3862943607382476, (s * -4.0) * p) + nk * 3.816429394731813e-10);
+        double r = SQRT(FMA(nk, 3.816429394731813e-10, FMA(nk, 1.3862943607382476, (s * -4.0) * p)));
 
         /* Nearest quarter turn q, and the angle left over in [-pi/4, pi/4]. */
         int64_t q = (int64_t)(b * 4.0 + 0.5);
@@ -768,7 +777,7 @@ NOINLINE static void normal_block_f32(const float *restrict u, float *restrict z
         memcpy(&mant, &ix, 4);
         float s = (mant - 1.0f) / (mant + 1.0f), zz = s * s;
         float p = FMAF(zz, FMAF(zz, FMAF(zz, 0.14275366f, 0.20000061f), 0.33333334f), 1.0f);
-        float r = sqrtf(FMAF(nk, 1.38629150390625f, (s * -4.0f) * p) + nk * 2.857213530660374e-06f);
+        float r = SQRTF(FMAF(nk, 2.857213530660374e-06f, FMAF(nk, 1.38629150390625f, (s * -4.0f) * p)));
 
         int32_t q = (int32_t)(b * 4.0f + 0.5f);
         float f = FMAF(-(float)q, 0.25f, b);
