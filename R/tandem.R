@@ -185,8 +185,9 @@ tandem_at <- function(rng, type, i) {
 #'
 #' `tandem_rnorm()` returns `n` standard normals by the Box-Muller transform. Pair `j`, elements
 #' `2j` and `2j + 1`, comes from the Float64 draws `2j` and `2j + 1` as `u` and `v`, with `u`
-#' mapped to `(0, 1]`: `r = sqrt(-2 log u)`, the cosine half `r cos(2 pi v)` first and the sine
-#' half `r sin(2 pi v)` second. An odd `n` uses the cosine half of its last pair and still
+#' mapped to `(0, 1]`. With the radius `sqrt(-2 log u)`, the cosine half is the radius times
+#' `cos(2 pi v)` and comes first, and the sine half is the radius times
+#' `sin(2 pi v)`. An odd `n` uses the cosine half of its last pair and still
 #' advances past both draws, so a fill consumes `2 ceiling(n / 2)` draws. Values agree across
 #' ports to about 1e-12 relative, since libm functions differ in the last places.
 #'

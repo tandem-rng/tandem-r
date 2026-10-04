@@ -41,8 +41,9 @@ vector otherwise.
 
 \code{tandem_rnorm()} returns \code{n} standard normals by the Box-Muller transform. Pair \code{j}, elements
 \verb{2j} and \verb{2j + 1}, comes from the Float64 draws \verb{2j} and \verb{2j + 1} as \code{u} and \code{v}, with \code{u}
-mapped to \verb{(0, 1]}: \verb{r = sqrt(-2 log u)}, the cosine half \verb{r cos(2 pi v)} first and the sine
-half \verb{r sin(2 pi v)} second. An odd \code{n} uses the cosine half of its last pair and still
+mapped to \verb{(0, 1]}. With the radius \verb{sqrt(-2 log u)}, the cosine half is the radius times
+\verb{cos(2 pi v)} and comes first, and the sine half is the radius times
+\verb{sin(2 pi v)}. An odd \code{n} uses the cosine half of its last pair and still
 advances past both draws, so a fill consumes \verb{2 ceiling(n / 2)} draws. Values agree across
 ports to about 1e-12 relative, since libm functions differ in the last places.
 }
