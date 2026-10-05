@@ -108,6 +108,26 @@ void tandem_fill_c64(tandem_rng *rng, double *out, size_t n);
 void tandem_fill_u32_below(tandem_rng *rng, uint32_t *out, size_t len, uint32_t n);
 void tandem_fill_u64_below(tandem_rng *rng, uint64_t *out, size_t len, uint64_t n);
 
+/* Weighted choice, Appendix C of the specification: an index in [0, m) with probability
+ * proportional to its weight, by an alias table in integers. tandem_choice_build fills the
+ * caller's cut and alias arrays of m entries and points the table at them, with no draw. It
+ * returns false and builds nothing unless 1 <= m < 2^32 and the weights are finite, not negative
+ * and not all zero. A draw consumes one 64-bit draw. Element i of a fill comes from draw i of
+ * tandem_fill_u64, so a fill equals n scalar draws and a fill cut anywhere equals the whole
+ * fill. An empty fill aligns the position to 64. The table and the indices are exact across
+ * ports. */
+typedef struct {
+    uint64_t capacity; /* S, the mass of one column */
+    const uint64_t *cut;
+    const uint32_t *alias;
+    uint32_t m;
+} tandem_choice_table;
+
+bool tandem_choice_build(tandem_choice_table *table, const double *weights, size_t m,
+                         uint64_t *cut, uint32_t *alias);
+uint32_t tandem_choice(tandem_rng *rng, const tandem_choice_table *table);
+void tandem_fill_choice(tandem_rng *rng, uint32_t *out, size_t n, const tandem_choice_table *table);
+
 /* f64: element i from draw i of tandem_fill_u64, n draws in all, so a fill equals n scalar draws
  * and a fill cut anywhere equals the whole fill. An empty fill aligns the position to 64.
  * f32: the flattened tandem_normal2_f32 pairs, pair j from uniforms 2j and 2j + 1. An odd n keeps

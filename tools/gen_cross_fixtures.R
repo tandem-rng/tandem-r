@@ -1,5 +1,5 @@
-# Converts tandem-c's cross-check headers, which tools/gen_cross.cpp generates from the CUDA
-# port's core.hpp, to tests/testthat/data/cross_bounded.json.
+# Converts tandem-c's cross-check headers, which tools/gen_cross.cpp generates, to
+# tests/testthat/data/cross_bounded.json.
 # Usage: Rscript tools/gen_cross_fixtures.R path/to/tandem-c/tests
 args <- commandArgs(TRUE)
 dir <- if (length(args)) args[1] else "../tandem-c/tests"
@@ -19,7 +19,7 @@ cases <- function(text, name) {
 # decimal parser. R's parser can miss the correctly rounded double by one ulp where long double is
 # not wider than double. jsonlite parses with the C library's strtod, which rounds correctly.
 bits <- function(text) {
-  x <- jsonlite::parse_json(paste0("[", paste(text, collapse = ","), "]"), simplifyVector = TRUE)
+  x <- as.double(jsonlite::parse_json(paste0("[", paste(text, collapse = ","), "]"), simplifyVector = TRUE))
   apply(matrix(as.character(writeBin(x, raw(), endian = "big")), 8), 2, paste, collapse = "")
 }
 
@@ -34,8 +34,23 @@ rows <- function(text, name) {
   })
 }
 
+# Rows {weights, m, capacity, start, {indices}, end_pos} of the weighted choice table, with the
+# weights of each row as bit patterns.
+choice <- function(text) {
+  arrays <- regmatches(text, gregexpr("CROSS_CHOICE_W[0-9]+\\[[0-9]+\\] = \\{[^}]*\\}", text))[[1]]
+  weights <- lapply(arrays, function(s) bits(trimws(strsplit(sub(".*\\{", "", sub("\\}$", "", s)), ",")[[1]])))
+  names(weights) <- sub("\\[.*", "", arrays)
+  pattern <- "\\{(CROSS_CHOICE_W[0-9]+), [0-9]+, 0x([0-9a-f]+)ull, ([0-9]+)ull,\\s*\\{([^}]*)\\},\\s*([0-9]+)u\\}"
+  lapply(regmatches(text, gregexpr(pattern, text))[[1]], function(s) {
+    f <- regmatches(s, regexec(pattern, s))[[1]]
+    list(weights = I(weights[[f[2]]]), capacity = f[3], start = f[4],
+         want = regmatches(f[5], gregexpr("[0-9]+", f[5]))[[1]], end_pos = f[6])
+  })
+}
+
 fill <- read("cross_fill_below.h")
 out <- list(
+  choice = choice(read("cross_choice.h")),
   exponential = rows(read("cross_exponential.h"), "CROSS_EXPONENTIAL"),
   fill_u32 = cases(fill, "CROSS_FILL_U32"),
   fill_u64 = cases(fill, "CROSS_FILL_U64"),

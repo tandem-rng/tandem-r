@@ -1249,6 +1249,97 @@ void tandem_fill_u64_below(tandem_rng *rng, uint64_t *out, size_t len, uint64_t 
     }
 }
 
+/* ---- Public: weighted choice ------------------------------------------------------------- */
+
+static unsigned bit_length(uint64_t x) {
+    unsigned n = 0;
+    for (; x; x >>= 1) n++;
+    return n;
+}
+
+/* ceil(w 2^t) for finite w >= 0, exact, from the integer significand of w. ldexp alone would
+ * round a positive w to 0 where the product is subnormal. The caller keeps the result below
+ * 2^64. */
+static uint64_t ceil_scaled(double w, int t) {
+    int E, k;
+    uint64_t s;
+    if (w == 0) return 0;
+    s = (uint64_t)ldexp(frexp(w, &E), 53); /* w = s 2^(E - 53), 2^52 <= s < 2^53 */
+    k = E - 53 + t;
+    if (k >= 0) return s << k;
+    if (k <= -54) return 1;
+    return (s >> -k) + ((s & ((UINT64_C(1) << -k) - 1u)) != 0);
+}
+
+/* The scale puts the mass total just below 2^63 for weights of any magnitude, from a first
+ * pass at a scale that cannot overflow. The pairing is Vose's alias method in exact integers,
+ * in place: cut[] holds the masses until a column is paired. */
+bool tandem_choice_build(tandem_choice_table *table, const double *weights, size_t m,
+                         uint64_t *cut, uint32_t *alias) {
+    double wmax = 0;
+    uint64_t total = 0, s;
+    size_t i, l, big = 0;
+    int e, t;
+    if (m == 0 || m > UINT32_MAX) return false;
+    for (i = 0; i < m; i++) {
+        if (!(isfinite(weights[i]) && weights[i] >= 0)) return false;
+        if (weights[i] > wmax) wmax = weights[i];
+    }
+    if (wmax == 0) return false;
+    frexp(wmax, &e);
+    t = 63 - (int)bit_length(m) - (e - 1);
+    for (i = 0; i < m; i++) total += ceil_scaled(weights[i], t);
+    t += 63 - (int)bit_length(total);
+    total = 0;
+    for (i = 0; i < m; i++) {
+        cut[i] = ceil_scaled(weights[i], t);
+        total += cut[i];
+        if (cut[i] > cut[big]) big = i;
+        alias[i] = (uint32_t)i;
+    }
+    s = (total + m - 1u) / m;
+    cut[big] += s * m - total;
+
+    for (l = 0; cut[l] < s; l++) {}
+    for (i = 0; i < m; i++)
+        for (size_t j = i; j <= i && cut[j] < s;) {
+            alias[j] = (uint32_t)l;
+            cut[l] -= s - cut[j];
+            j = l;
+            if (cut[l] < s)
+                do l++;
+                while (l < m && cut[l] < s);
+        }
+    table->capacity = s;
+    table->cut = cut;
+    table->alias = alias;
+    table->m = (uint32_t)m;
+    return true;
+}
+
+static inline uint32_t choice_of(const tandem_choice_table *t, uint64_t r) {
+    uint64_t j = mulhi64(r, t->m);
+    return mulhi64(r * t->m, t->capacity) < t->cut[j] ? (uint32_t)j : t->alias[j];
+}
+
+uint32_t tandem_choice(tandem_rng *rng, const tandem_choice_table *table) {
+    return choice_of(table, tandem_next_u64(rng));
+}
+
+#define CHOICE_BLOCK 512u
+
+void tandem_fill_choice(tandem_rng *rng, uint32_t *out, size_t n, const tandem_choice_table *table) {
+    uint64_t r[CHOICE_BLOCK];
+    rng->pos = align_pos(rng->pos, 64); /* an empty fill only aligns */
+    while (n) {
+        size_t k = n < CHOICE_BLOCK ? n : CHOICE_BLOCK;
+        tandem_fill_u64(rng, r, k);
+        for (size_t i = 0; i < k; i++) out[i] = choice_of(table, r[i]);
+        out += k;
+        n -= k;
+    }
+}
+
 /* The scalar draw seeds its one fallback stream by the public split and sub, and the fills by
  * eight lanes, so that equal draws in both prove the lanes right. */
 double tandem_normal_f64(tandem_rng *rng) {

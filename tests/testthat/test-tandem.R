@@ -460,3 +460,50 @@ test_that("a bounded fill cut at any element equals the whole fill, rejections i
     }
   }
 })
+
+test_that("weighted choice matches the specification's tables and indices", {
+  for (case in vectors$choice$cases) {
+    table <- tandem_choice_table(unlist(case$weights))
+    parts <- .Call(tandemrng:::R_tandem_choice_parts, table)
+    expect_identical(parts[[1]], case$S)
+    expect_identical(parts[[2]], unlist(case$cut))
+    expect_identical(parts[[3]], as.integer(unlist(case$alias)))
+    rng <- tandem_from_key(key, 0, K)
+    m <- length(case$weights)
+    expect_identical(tandem_sample_int(rng, 16, m, table), as.integer(unlist(case$indices)) + 1L)
+    expect_identical(tandem_position(rng), 16 * 64)
+  }
+})
+
+test_that("weighted choice is bit identical to tandem-c's fixture", {
+  # Zero, subnormal and near-overflow weights, and 100 weights, from aligned and unaligned starts.
+  for (case in cross$choice) {
+    w <- from_bits(case$weights)
+    rng <- at_start(case$start)
+    got <- tandem_sample_int(rng, 64, length(w), w)
+    expect_identical(got, as.integer(unlist(case$want)) + 1L)
+    expect_identical(tandem_position(rng), as.numeric(case$end_pos))
+    expect_identical(.Call(tandemrng:::R_tandem_choice_parts, tandem_choice_table(w))[[1]],
+                     case$capacity)
+  }
+})
+
+test_that("a choice table is reusable, survives serialization and ignores power-of-two scale", {
+  w <- c(3, 0, 1, 7.5, 0.125)
+  want <- tandem_sample_int(at_start(12345), 1000, 5, w)
+  table <- unserialize(serialize(tandem_choice_table(2^-900 * w), NULL))
+  rng <- at_start(12345)
+  expect_identical(c(tandem_sample_int(rng, 400, 5, table), tandem_sample_int(rng, 600, 5, table)),
+                   want)
+})
+
+test_that("weighted choice follows the weights", {
+  # Pearson's chi-square over the positive weights, 8 degrees of freedom, at the 0.01 % point.
+  w <- c(5, 0, 1, 2, 3, 0.5, 8, 13, 0.25, 21)
+  n <- 1e7
+  count <- tabulate(tandem_sample_int(tandem(2026), n, 10, w), 10)
+  expect_identical(count[2], 0L)
+  expect <- n * w / sum(w)
+  pos <- w > 0
+  expect_lt(sum((count[pos] - expect[pos])^2 / expect[pos]), qchisq(1 - 1e-4, 8))
+})

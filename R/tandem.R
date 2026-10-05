@@ -201,18 +201,33 @@ tandem_at <- function(rng, type, i) {
 #' `rexp()` after `RNGkind("user-supplied")` runs R's own algorithm on the Tandem uniforms and does
 #' not return these values.
 #'
+#' With `prob`, `tandem_sample_int()` returns `n` indices on `1..max` with probabilities
+#' proportional to the weights, as `sample.int(max, n, replace = TRUE, prob = prob)` does, by the
+#' integer alias table of Appendix C of the specification. Index `i` maps the 64-bit draw `i`, so a
+#' fill uses exactly `n` draws, a fill cut into pieces equals the whole fill, and the indices equal
+#' tandem-c's and those of every other port. An empty fill aligns the position to 64.
+#' `tandem_choice_table()` builds the table once, for repeated draws from the same weights. The
+#' build is exact, so weights scaled by a power of two give the same table unless the scaling
+#' rounds them. A table survives `saveRDS()` and parallel workers.
+#'
 #' @param rng A `tandem_rng` object.
 #' @param n The number of values. `tandem_rnorm()` and `tandem_rexp()` take a vector as its
 #'   length, as [rnorm()] does.
 #' @param max The number of values to choose from, an integer-valued number or decimal string in
-#'   `[1, 2^53]`, where `2^53` itself needs the string form.
+#'   `[1, 2^53]`, where `2^53` itself needs the string form. With `prob`, the number of weights.
+#' @param prob `NULL`, or `max` finite nonnegative weights, not all zero, or a table of them from
+#'   `tandem_choice_table()`.
 #' @param mean,sd Means and standard deviations, recycled to `n` as in [rnorm()].
 #' @param rate Positive rates, recycled to `n` as in [rexp()].
-#' @return An integer or double vector.
+#' @return An integer or double vector. `tandem_choice_table()` returns a `tandem_choice_table`
+#'   object.
 #' @examples
 #' rng <- tandem(42)
 #' tandem_sample_int(rng, 5, 6)
 #' tandem_below(rng, 5, 6)
+#' tandem_sample_int(rng, 5, 3, prob = c(1, 2, 7))
+#' table <- tandem_choice_table(c(1, 2, 7))
+#' tandem_sample_int(rng, 5, 3, prob = table)
 #' tandem_rnorm(rng, 3)
 #' tandem_rexp(rng, 3)
 #' @name distributions
@@ -220,7 +235,21 @@ NULL
 
 #' @rdname distributions
 #' @export
-tandem_sample_int <- function(rng, n, max) .Call(R_tandem_below, rng, as.double(n), max, 1L)
+tandem_sample_int <- function(rng, n, max, prob = NULL) {
+  if (is.null(prob)) return(.Call(R_tandem_below, rng, as.double(n), max, 1L))
+  if (!inherits(prob, "tandem_choice_table")) prob <- tandem_choice_table(prob)
+  .Call(R_tandem_choice, rng, as.double(n), max, prob)
+}
+
+#' @rdname distributions
+#' @export
+tandem_choice_table <- function(prob) .Call(R_tandem_choice_table, as.double(prob))
+
+#' @export
+print.tandem_choice_table <- function(x, ...) {
+  cat(sprintf("Tandem choice table of %d weights\n", length(.Call(R_tandem_choice_parts, x)[[3]])))
+  invisible(x)
+}
 
 #' @rdname distributions
 #' @export

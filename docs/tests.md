@@ -9,7 +9,7 @@ pixi run test     # tests/testthat/test-tandem.R
 `tests/testthat/test-tandem.R` checks:
 
 - Every specification vector (`vectors.json`) and the stream dumps in `tests/testthat/data`.
-- Bounded integers, normals, and exponentials against tandem-c fixtures, built by
+- Bounded integers, weighted choice, normals, and exponentials against tandem-c fixtures, built by
   `tools/gen_cross_fixtures.R`, and against its recorded hashes.
 - The base R hook, serialization, `callr`, and forked `parallel::mclapply()` workers.
 - Fills cut at any element equal the whole fill.

@@ -10,7 +10,7 @@ R package `tandemrng` for [Tandem8x32](https://github.com/tandem-rng/spec), a no
 pseudorandom number generator. It wraps a vendored tandem-c and produces the specified stream
 bit for bit, and it can serve as the base R generator.
 
-Needs a C99 compiler. The vendored C code is tandem-c at commit `121db59`.
+Needs a C99 compiler. The vendored C code is tandem-c at commit `eba98f2`.
 
 ```r
 # install.packages("remotes")
@@ -24,6 +24,7 @@ rng <- tandem(42)                    # the spec's stream for seed 42
 u <- tandem_runif(rng, 1e6)          # Float64 draws
 worker <- tandem_split(rng, 7)       # by index, from the key alone
 z <- tandem_rnorm(worker, 10)        # standard normals by the ziggurat
+k <- tandem_sample_int(rng, 10, 3, prob = c(1, 2, 7))  # weighted, like sample.int
 RNGkind("user-supplied")             # Tandem as the base R generator
 ```
 

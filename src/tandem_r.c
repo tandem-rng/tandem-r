@@ -6,6 +6,7 @@
 #include <Rinternals.h>
 #include <R_ext/Rdynload.h>
 #include <R_ext/Random.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -422,6 +423,89 @@ SEXP R_tandem_rexp(SEXP rng, SEXP n) {
     return out;
 }
 
+/* ---- Weighted choice -------------------------------------------------------------------- */
+
+/* A table is an external pointer to one block: the C table, then cut[m], then alias[m]. Its tag
+ * holds a copy of the weights, which serialization keeps, so a deserialized table, whose address
+ * is null, rebuilds itself on first use. The build is exact, so the rebuilt table is the same. */
+static void choice_finalize(SEXP ptr) {
+    void *t = R_ExternalPtrAddr(ptr);
+    if (t) {
+        R_Free(t);
+        R_ClearExternalPtr(ptr);
+    }
+}
+
+typedef struct {
+    tandem_choice_table table;
+    uint64_t cut[]; /* then alias[m] */
+} choice_block;
+
+static void choice_attach(SEXP ptr, SEXP weights) {
+    size_t m;
+    choice_block *b;
+    if (TYPEOF(weights) != REALSXP) error("the table has been freed");
+    m = (size_t)XLENGTH(weights);
+    b = (choice_block *)R_Calloc(sizeof *b + m * (sizeof(uint64_t) + sizeof(uint32_t)), char);
+    if (!tandem_choice_build(&b->table, REAL(weights), m, b->cut, (uint32_t *)(b->cut + m))) {
+        R_Free(b);
+        error("prob must be finite and nonnegative, and not all zero");
+    }
+    R_SetExternalPtrAddr(ptr, b);
+    R_RegisterCFinalizerEx(ptr, choice_finalize, TRUE);
+}
+
+SEXP R_tandem_choice_table(SEXP weights) {
+    SEXP w, ptr, cls;
+    if (TYPEOF(weights) != REALSXP || XLENGTH(weights) < 1 || XLENGTH(weights) > INT_MAX)
+        error("prob must hold 1 to 2^31 - 1 weights");
+    w = PROTECT(duplicate(weights));
+    ptr = PROTECT(R_MakeExternalPtr(NULL, w, R_NilValue));
+    choice_attach(ptr, w);
+    cls = PROTECT(mkString("tandem_choice_table"));
+    setAttrib(ptr, R_ClassSymbol, cls);
+    UNPROTECT(3);
+    return ptr;
+}
+
+static const tandem_choice_table *choice_unwrap(SEXP ptr) {
+    if (TYPEOF(ptr) != EXTPTRSXP || !inherits(ptr, "tandem_choice_table"))
+        error("expected a tandem_choice_table object");
+    if (!R_ExternalPtrAddr(ptr)) choice_attach(ptr, R_ExternalPtrTag(ptr));
+    return &((choice_block *)R_ExternalPtrAddr(ptr))->table;
+}
+
+/* n indices on 1..max with probability proportional to the table's weights. */
+SEXP R_tandem_choice(SEXP rng, SEXP n, SEXP max, SEXP table) {
+    size_t len = parse_n(n);
+    const tandem_choice_table *t = choice_unwrap(table);
+    tandem_rng *g;
+    SEXP out;
+    int *x;
+    if (parse_u64(max, "max") != t->m) error("prob must hold max weights");
+    g = unwrap(rng);
+    out = PROTECT(allocVector(INTSXP, (R_xlen_t)len));
+    x = INTEGER(out);
+    tandem_fill_choice(g, (uint32_t *)x, len, t);
+    sync_position(rng, g);
+    for (size_t i = 0; i < len; i++) x[i]++;
+    UNPROTECT(1);
+    return out;
+}
+
+/* The table as capacity, cut in hex and alias, for the tests against the spec's vectors. */
+SEXP R_tandem_choice_parts(SEXP table) {
+    const tandem_choice_table *t = choice_unwrap(table);
+    SEXP out = PROTECT(allocVector(VECSXP, 3)), alias;
+    SET_VECTOR_ELT(out, 0, u64_hex(&t->capacity, 1));
+    SET_VECTOR_ELT(out, 1, u64_hex(t->cut, t->m));
+    alias = allocVector(INTSXP, t->m);
+    SET_VECTOR_ELT(out, 2, alias);
+    memcpy(INTEGER(alias), t->alias, t->m * sizeof *t->alias);
+    UNPROTECT(1);
+    return out;
+}
+
 /* The bytes of the f64 normal fills tandem-c hashes in tests/test_normal_bits.c, hashed here to
  * show that this build, with R's compiler and flags, produces the same bits. R has no f32 normals.
  * Internal, used by tests. */
@@ -604,6 +688,9 @@ static const R_CallMethodDef calls[] = {
     {"R_tandem_normal_hash", (DL_FUNC)&R_tandem_normal_hash, 0},
     {"R_tandem_rexp", (DL_FUNC)&R_tandem_rexp, 2},
     {"R_tandem_exponential_hash", (DL_FUNC)&R_tandem_exponential_hash, 0},
+    {"R_tandem_choice_table", (DL_FUNC)&R_tandem_choice_table, 1},
+    {"R_tandem_choice", (DL_FUNC)&R_tandem_choice, 4},
+    {"R_tandem_choice_parts", (DL_FUNC)&R_tandem_choice_parts, 1},
     {"R_tandem_split", (DL_FUNC)&R_tandem_split, 2},
     {"R_tandem_sub", (DL_FUNC)&R_tandem_sub, 2},
     {"R_tandem_fork", (DL_FUNC)&R_tandem_fork, 2},

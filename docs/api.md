@@ -41,6 +41,8 @@ identical(runif(3), a)               # TRUE: restoring the seed repeats the draw
 - `tandem_rbits(rng, n, bits)`: 8, 16, 32, or 64-bit words. 64-bit words are `bit64::integer64`
   if `bit64` is installed, else 16-digit hex strings.
 - `tandem_below`, `tandem_sample_int`: bounded integers on `0..max-1` and `1..max`.
+- `tandem_sample_int(rng, n, max, prob)`, `tandem_choice_table(prob)`: weighted indices on `1..max`
+  by the alias table of Appendix C, bit exact with tandem-c. A table serves repeated draws.
 - `tandem_rnorm`, `tandem_rexp`: ziggurat normals and `-log(1 - u) / rate` exponentials.
 - `tandem_split`, `tandem_fork`, `tandem_sub`: child streams.
 - `tandem_at`: elements of the next fill, without drawing, for `"u32"`, `"u64"`, `"f32"`, `"f64"`.

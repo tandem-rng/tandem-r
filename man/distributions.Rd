@@ -3,12 +3,15 @@
 \name{distributions}
 \alias{distributions}
 \alias{tandem_sample_int}
+\alias{tandem_choice_table}
 \alias{tandem_below}
 \alias{tandem_rnorm}
 \alias{tandem_rexp}
 \title{Bounded integers, normals and exponentials}
 \usage{
-tandem_sample_int(rng, n, max)
+tandem_sample_int(rng, n, max, prob = NULL)
+
+tandem_choice_table(prob)
 
 tandem_below(rng, n, max)
 
@@ -23,14 +26,18 @@ tandem_rexp(rng, n, rate = 1)
 length, as \code{\link[=rnorm]{rnorm()}} does.}
 
 \item{max}{The number of values to choose from, an integer-valued number or decimal string in
-\verb{[1, 2^53]}, where \code{2^53} itself needs the string form.}
+\verb{[1, 2^53]}, where \code{2^53} itself needs the string form. With \code{prob}, the number of weights.}
+
+\item{prob}{\code{NULL}, or \code{max} finite nonnegative weights, not all zero, or a table of them from
+\code{tandem_choice_table()}.}
 
 \item{mean, sd}{Means and standard deviations, recycled to \code{n} as in \code{\link[=rnorm]{rnorm()}}.}
 
 \item{rate}{Positive rates, recycled to \code{n} as in \code{\link[=rexp]{rexp()}}.}
 }
 \value{
-An integer or double vector.
+An integer or double vector. \code{tandem_choice_table()} returns a \code{tandem_choice_table}
+object.
 }
 \description{
 These draws follow Appendix A of the specification, which is not normative. They are the fills
@@ -61,11 +68,23 @@ the same fused arithmetic on every port, so the values at \code{rate = 1} are bi
 across ports. Base R has no user-supplied hook for exponentials, so
 \code{rexp()} after \code{RNGkind("user-supplied")} runs R's own algorithm on the Tandem uniforms and does
 not return these values.
+
+With \code{prob}, \code{tandem_sample_int()} returns \code{n} indices on \verb{1..max} with probabilities
+proportional to the weights, as \code{sample.int(max, n, replace = TRUE, prob = prob)} does, by the
+integer alias table of Appendix C of the specification. Index \code{i} maps the 64-bit draw \code{i}, so a
+fill uses exactly \code{n} draws, a fill cut into pieces equals the whole fill, and the indices equal
+tandem-c's and those of every other port. An empty fill aligns the position to 64.
+\code{tandem_choice_table()} builds the table once, for repeated draws from the same weights. The
+build is exact, so weights scaled by a power of two give the same table unless the scaling
+rounds them. A table survives \code{saveRDS()} and parallel workers.
 }
 \examples{
 rng <- tandem(42)
 tandem_sample_int(rng, 5, 6)
 tandem_below(rng, 5, 6)
+tandem_sample_int(rng, 5, 3, prob = c(1, 2, 7))
+table <- tandem_choice_table(c(1, 2, 7))
+tandem_sample_int(rng, 5, 3, prob = table)
 tandem_rnorm(rng, 3)
 tandem_rexp(rng, 3)
 }
