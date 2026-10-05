@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # The commit the README names; tools/sync_c.sh copies from it.
-      TANDEM_C: eba98f2
+      TANDEM_C: 1adf2ac
     steps:
       - uses: actions/checkout@v7
       - run: git clone -q https://github.com/tandem-rng/tandem-c ../tandem-c
