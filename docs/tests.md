@@ -13,7 +13,7 @@ pixi run test     # tests/testthat/test-*.R
 - The moments and distributions of normals, exponentials and weighted choice.
 
 `tests/testthat/test-conformance.R` checks the spec's conformance files and the items of its
-`conformance/CHECKLIST.md` that the package's draws reach.
+`conformance/CHECKLIST.md` at b31af72 that the package's draws reach.
 
 `tests/testthat/test-tandem.R` checks every vector of the specification
 (`tests/testthat/vectors.json`, a copy of the spec repository's file), compares fills with

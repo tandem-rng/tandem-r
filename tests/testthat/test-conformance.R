@@ -1,5 +1,5 @@
 # The spec's conformance files, copies of tandem-spec f420545 conformance/*.json that CI checks
-# byte for byte, and the items of its conformance/CHECKLIST.md. This package offers no scalar
+# byte for byte, and the items of its conformance/CHECKLIST.md at b31af72. This package offers no scalar
 # bounded draw, no Float32 normals or exponentials and no complex draws, so below.json, the
 # Float32 cases and the items on Box-Muller pairs, odd n and complex draws do not apply.
 
