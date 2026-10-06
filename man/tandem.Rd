@@ -29,7 +29,8 @@ up to \code{2^128 - 1}, or \code{NULL} for 128 bits of operating system entropy.
 
 \item{key}{Four doubles or a string of 32 hex digits.}
 
-\item{position}{The stream bit position of the next draw.}
+\item{position}{The stream bit position of the next draw, below \code{2^63} as the specification
+requires of a start position.}
 
 \item{rng}{A \code{tandem_rng} object.}
 }

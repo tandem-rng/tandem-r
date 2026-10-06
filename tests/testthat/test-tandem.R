@@ -89,8 +89,8 @@ test_that("positions align to the width and fills can start anywhere", {
     tandem_set_position(r, 64 * start)
     expect_identical(tandem_runif(r, 3000 - start), whole[(start + 1):3000])
   }
-  big <- tandem_from_key(key, "18446744073709551000", K)
-  expect_identical(tandem_position(big), "18446744073709551000")
+  big <- tandem_from_key(key, "9223372036854775000", K)
+  expect_identical(tandem_position(big), "9223372036854775000")
 })
 
 test_that("state round-trips through a plain list", {
@@ -99,9 +99,9 @@ test_that("state round-trips through a plain list", {
   s <- tandem_state(rng)
   expect_identical(s, list(key = tandem_key(rng), position = "320", K = 8L))
   expect_identical(tandem_runif(tandem_restore(s), 4), tandem_runif(rng, 4))
-  big <- tandem_from_key(key, "18446744073709551000", K)
-  expect_identical(tandem_state(big)$position, "18446744073709551000")
-  expect_identical(tandem_position(tandem_restore(tandem_state(big))), "18446744073709551000")
+  big <- tandem_from_key(key, "9223372036854775000", K)
+  expect_identical(tandem_state(big)$position, "9223372036854775000")
+  expect_identical(tandem_position(tandem_restore(tandem_state(big))), "9223372036854775000")
 })
 
 test_that("a generator survives serialization at its current position", {
@@ -290,80 +290,14 @@ test_that("random access of 64-bit words matches the Julia dump", {
   expect_identical(hex, tandem_rbits(tandem_from_key(k1234, 0, 32), 2048, 64)[idx + 1])
 })
 
+# The values of the bounded, normal, exponential and choice draws are checked against the spec's
+# conformance files in test-conformance.R. These tests cover the R interface and the statistics.
 
-# Fixtures from tandem-c's tests/cross_fill_below.h, cross_normal.h and cross_exponential.h,
-# which tandem-c generates from the CUDA port's core.hpp (tools/gen_cross_fixtures.R converts
-# them). Every case starts from tandem(42), many at unaligned bit positions. The bounded range
-# 2^31 + 2^30 + 1 rejects about a quarter of the draws, so it covers the fallback stream.
-cross <- jsonlite::fromJSON(test_path("data", "cross_bounded.json"), simplifyVector = FALSE)
-# Doubles from the 16 hex digits of their bit pattern, most significant first.
-from_bits <- function(h) {
-  h <- unlist(h)
-  hex <- substring(paste(h, collapse = ""), seq(1, by = 2, length.out = 8 * length(h)),
-                   seq(2, by = 2, length.out = 8 * length(h)))
-  readBin(as.raw(strtoi(hex, 16L)), "double", length(h), endian = "big")
-}
-at_start <- function(start) {
-  rng <- tandem(42)
-  tandem_set_position(rng, as.numeric(start))
-  rng
-}
-after_bit <- function() {
-  rng <- tandem(42)
-  tandem_rbool(rng, 1)
-  rng
-}
-
-test_that("bounded fills match the CUDA core", {
-  # tandem_below draws 64-bit words only for ranges above 2^32 - 1, and the values must fit
-  # doubles, so of the 64-bit cases only 10^12 applies.
-  tera <- Filter(function(case) case$n == "1000000000000", cross$fill_u64)
-  for (cases in list(cross$fill_u32, tera)) {
-    for (case in cases) {
-      rng <- at_start(case$start)
-      got <- tandem_below(rng, 64, case$n)
-      expect_equal(as.numeric(got), as.numeric(unlist(case$want)))
-      expect_identical(tandem_position(rng), as.numeric(case$end_pos))
-    }
-  }
-})
-
-test_that("sample_int is the bounded fill on 1..max, as sample.int", {
-  for (case in cross$fill_u32) {
-    rng <- at_start(case$start)
-    got <- tandem_sample_int(rng, 64, case$n)
-    expect_equal(as.numeric(got), as.numeric(unlist(case$want)) + 1)
-    expect_identical(tandem_position(rng), as.numeric(case$end_pos))
-  }
+test_that("sample_int returns integers while the values fit, as sample.int", {
   expect_type(tandem_sample_int(tandem(1), 3, 2147483647), "integer")
   expect_type(tandem_sample_int(tandem(1), 3, 2147483648), "double")
   expect_type(tandem_below(tandem(1), 3, 2147483648), "integer")
   expect_identical(tandem_sample_int(tandem(1), 1, 1), 1L)
-})
-
-test_that("normals are bit identical to tandem-c's ziggurat fixture", {
-  # The last rows include draws outside the inner rectangles: wedge and tail.
-  for (case in cross$normal) {
-    rng <- at_start(case$start)
-    expect_identical(tandem_rnorm(rng, 64), from_bits(case$want))
-    expect_identical(tandem_position(rng), as.numeric(case$end_pos))
-  }
-})
-
-test_that("a normal fill cut at any element equals the whole fill", {
-  # 3000 draws hold about 13 that leave the inner rectangles and use their fallback stream.
-  whole <- tandem_rnorm(at_start(12345), 3000)
-  for (k in c(1, 2, 31, 33, 1000, 2999)) {
-    rng <- at_start(12345)
-    expect_identical(c(tandem_rnorm(rng, k), tandem_rnorm(rng, 3000 - k)), whole)
-    expect_identical(tandem_position(rng), (ceiling(12345 / 64) + 3000) * 64)
-  }
-})
-
-test_that("an empty normal fill aligns the position to 64, as section 5 of the spec says", {
-  rng <- after_bit()
-  expect_length(tandem_rnorm(rng, 0), 0)
-  expect_identical(tandem_position(rng), 64)
 })
 
 test_that("normals have the moments and distribution of N(0, 1)", {
@@ -374,49 +308,6 @@ test_that("normals have the moments and distribution of N(0, 1)", {
   v <- c(1, 2, 15, 96)
   for (k in 1:4) expect_lt(abs(mean(x^k) - m[k]) / sqrt(v[k] / n), 4)
   expect_gt(suppressWarnings(ks.test(x, "pnorm"))$p.value, 1e-3)
-})
-
-test_that("the word width follows the range, 32 bits up to 2^32 inclusive", {
-  # A range of 2^32 never rejects, so the value is the 32-bit word itself.
-  expect_identical(tandem_below(tandem(42), 50, 4294967296), tandem_rbits(tandem(42), 50, 32))
-  expect_identical(tandem_sample_int(tandem(42), 50, 4294967296),
-                   tandem_rbits(tandem(42), 50, 32) + 1)
-  # 2^32 + 1 reads 64-bit words, which advance the position twice as far.
-  rng <- tandem(42)
-  tandem_below(rng, 50, 4294967297)
-  expect_identical(tandem_position(rng), 50 * 64)
-})
-
-test_that("normal fills are bit identical to tandem-c's recorded hash", {
-  expect_identical(.Call(tandemrng:::R_tandem_normal_hash), "a61cfa844c85f7c1")
-})
-
-test_that("exponentials are bit identical to tandem-c's fixture from the CUDA core", {
-  for (case in cross$exponential) {
-    rng <- at_start(case$start)
-    expect_identical(tandem_rexp(rng, 64), from_bits(case$want))
-    expect_identical(tandem_position(rng), as.numeric(case$end_pos))
-  }
-})
-
-test_that("exponentials are bit identical to tandem-c's recorded hash", {
-  expect_identical(.Call(tandemrng:::R_tandem_exponential_hash), "47f8f98297d94ee2")
-})
-
-test_that("an exponential fill cut at any element equals the whole fill", {
-  whole <- tandem_rexp(at_start(12345), 200)
-  for (k in c(0, 1, 2, 31, 32, 33, 100, 199, 200)) {
-    rng <- at_start(12345)
-    expect_identical(c(tandem_rexp(rng, k), tandem_rexp(rng, 200 - k)), whole)
-    expect_identical(tandem_position(rng), (ceiling(12345 / 64) + 200) * 64)
-  }
-})
-
-test_that("an empty exponential fill leaves an unaligned position alone", {
-  rng <- tandem(42)
-  tandem_rbool(rng, 1)
-  expect_length(tandem_rexp(rng, 0), 0)
-  expect_identical(tandem_position(rng), 1)
 })
 
 test_that("parameters recycle and a vector n counts its length, as in base R samplers", {
@@ -438,61 +329,11 @@ test_that("exponentials have the moments and distribution of Exp(1)", {
   expect_gt(suppressWarnings(ks.test(x, "pexp"))$p.value, 1e-3)
 })
 
-test_that("empty bounded fills leave an unaligned position alone", {
-  for (f in list(tandem_below, tandem_sample_int)) {
-    for (max in c(6, 4294967297)) {
-      rng <- tandem(42)
-      tandem_rbool(rng, 1)
-      expect_length(f(rng, 0, max), 0)
-      expect_identical(tandem_position(rng), 1)
-    }
-  }
-})
-
-test_that("a bounded fill cut at any element equals the whole fill, rejections included", {
-  # 2^31 + 2^30 + 1 rejects about a quarter of the draws; the start is unaligned.
-  for (max in c(3221225473, 1000000000000)) {
-    whole <- tandem_below(at_start(12345), 200, max)
-    for (k in c(0, 1, 2, 31, 32, 33, 100, 199, 200)) {
-      rng <- at_start(12345)
-      cut <- c(tandem_below(rng, k, max), tandem_below(rng, 200 - k, max))
-      expect_identical(cut, whole)
-    }
-  }
-})
-
-test_that("weighted choice matches the specification's tables and indices", {
-  for (case in vectors$choice$cases) {
-    table <- tandem_choice_table(unlist(case$weights))
-    parts <- .Call(tandemrng:::R_tandem_choice_parts, table)
-    expect_identical(parts[[1]], case$S)
-    expect_identical(parts[[2]], unlist(case$cut))
-    expect_identical(parts[[3]], as.integer(unlist(case$alias)))
-    rng <- tandem_from_key(key, 0, K)
-    m <- length(case$weights)
-    expect_identical(tandem_sample_int(rng, 16, m, table), as.integer(unlist(case$indices)) + 1L)
-    expect_identical(tandem_position(rng), 16 * 64)
-  }
-})
-
-test_that("weighted choice is bit identical to tandem-c's fixture", {
-  # Zero, subnormal and near-overflow weights, and 100 weights, from aligned and unaligned starts.
-  for (case in cross$choice) {
-    w <- from_bits(case$weights)
-    rng <- at_start(case$start)
-    got <- tandem_sample_int(rng, 64, length(w), w)
-    expect_identical(got, as.integer(unlist(case$want)) + 1L)
-    expect_identical(tandem_position(rng), as.numeric(case$end_pos))
-    expect_identical(.Call(tandemrng:::R_tandem_choice_parts, tandem_choice_table(w))[[1]],
-                     case$capacity)
-  }
-})
-
 test_that("a choice table is reusable, survives serialization and ignores power-of-two scale", {
   w <- c(3, 0, 1, 7.5, 0.125)
-  want <- tandem_sample_int(at_start(12345), 1000, 5, w)
+  want <- tandem_sample_int(tandem_from_key(key, 12345), 1000, 5, w)
   table <- unserialize(serialize(tandem_choice_table(2^-900 * w), NULL))
-  rng <- at_start(12345)
+  rng <- tandem_from_key(key, 12345)
   expect_identical(c(tandem_sample_int(rng, 400, 5, table), tandem_sample_int(rng, 600, 5, table)),
                    want)
 })

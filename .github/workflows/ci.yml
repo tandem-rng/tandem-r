@@ -34,15 +34,18 @@ jobs:
           args: 'c("--no-manual", "--as-cran")'
           error-on: '"warning"'
   vendored-c:
-    name: vendored C is the pinned tandem-c, on its main, and vectors are current
+    name: vendored C is the pinned tandem-c, on its main, and vectors and conformance files are current
     runs-on: ubuntu-latest
     env:
       # The commit the README names; tools/sync_c.sh copies from it.
       TANDEM_C: 1adf2ac
+      # The spec commit whose conformance/*.json tests/testthat/conformance copies.
+      SPEC: f420545
     steps:
       - uses: actions/checkout@v7
       - run: git clone -q https://github.com/tandem-rng/tandem-c ../tandem-c
       - run: git -C ../tandem-c merge-base --is-ancestor "$TANDEM_C" origin/main
       - run: for f in tandem.c tandem.h tandem_normal_tables.h; do git -C ../tandem-c show "$TANDEM_C:$f" | diff - src/$f; done
-      - run: git clone --depth 1 https://github.com/tandem-rng/spec ../spec
+      - run: git clone -q https://github.com/tandem-rng/spec ../spec
       - run: diff ../spec/vectors.json tests/testthat/vectors.json
+      - run: for f in tests/testthat/conformance/*.json; do git -C ../spec show "$SPEC:conformance/$(basename $f)" | diff - $f; done

@@ -13,7 +13,8 @@
 #'   up to `2^128 - 1`, or `NULL` for 128 bits of operating system entropy.
 #' @param K The chunk length, a power of two in `[1, 65536]`.
 #' @param key Four doubles or a string of 32 hex digits.
-#' @param position The stream bit position of the next draw.
+#' @param position The stream bit position of the next draw, below `2^63` as the specification
+#'   requires of a start position.
 #' @param rng A `tandem_rng` object.
 #' @return `tandem()` and `tandem_from_key()` return a `tandem_rng` object. The accessors
 #'   return the key as a hex string, the position as a double (a string from `2^53`), and

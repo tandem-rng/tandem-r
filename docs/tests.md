@@ -1,7 +1,7 @@
 # Tests
 
 ```sh
-pixi run test     # tests/testthat/test-tandem.R
+pixi run test     # tests/testthat/test-*.R
 ```
 
 ## Suite
@@ -9,10 +9,11 @@ pixi run test     # tests/testthat/test-tandem.R
 `tests/testthat/test-tandem.R` checks:
 
 - Every specification vector (`vectors.json`) and the stream dumps in `tests/testthat/data`.
-- Bounded integers, weighted choice, normals, and exponentials against tandem-c fixtures, built by
-  `tools/gen_cross_fixtures.R`, and against its recorded hashes.
 - The base R hook, serialization, `callr`, and forked `parallel::mclapply()` workers.
-- Fills cut at any element equal the whole fill.
+- The moments and distributions of normals, exponentials and weighted choice.
+
+`tests/testthat/test-conformance.R` checks the spec's conformance files and the items of its
+`conformance/CHECKLIST.md` that the package's draws reach.
 
 `tests/testthat/test-tandem.R` checks every vector of the specification
 (`tests/testthat/vectors.json`, a copy of the spec repository's file), compares fills with
@@ -21,17 +22,20 @@ saving `.Random.seed`, drawing, restoring and redrawing repeats, across the buff
 that generators survive `saveRDS()`/`readRDS()`, `serialize()`, a `callr` child process and
 forked `parallel::mclapply()` workers at their current position, and compares 64-bit words
 with `k1234_K32_u64.bin` in both result types. Random access is checked against the
-matching fill at several positions and chunk lengths. Bounded integers and normals are
-compared with tandem-c's fixtures, converted to
-`tests/testthat/data/cross_bounded.json` by `tools/gen_cross_fixtures.R`: integer ranges that reject
-about a quarter of the draws, the stream position after them, and 64 normals from each of six
-starts, with wedge and tail draws among them. A bounded or normal fill cut at
-an arbitrary element equals the whole fill at an unaligned start with rejections, the word width
-changes at `max = 2^32 + 1`, and a hash of 5 x 10^6 normals matches tandem-c's
-recorded value, which pins the bits on every compiler CI builds with. An empty normal fill aligns
-the position to 64, and 10^7 normals have the first four moments and the Kolmogorov-Smirnov
-statistic of N(0, 1). Exponentials are compared
-bit for bit with tandem-c's fixture, also from `core.hpp`, at five start positions, unaligned ones
-included, and with tandem-c's recorded hash of 10^6 doubles and 10^6 floats from each of those
-starts. A cut fill equals the whole fill, an empty fill leaves the position alone, and 10^7
-exponentials have the first four moments and the Kolmogorov-Smirnov statistic of Exp(1).
+matching fill at several positions and chunk lengths. 10^7 normals and exponentials have the
+first four moments and the Kolmogorov-Smirnov statistic of N(0, 1) and Exp(1), and 10^7 weighted
+choices pass a chi-square test against their weights.
+
+`tests/testthat/conformance` holds copies of the spec's `conformance/*.json` at commit `f420545`,
+and CI checks them byte for byte. `tests/testthat/test-conformance.R` compares the bounded fills,
+Float64 normals, Float64 exponentials and weighted choice with every case they reach, values and
+end positions. It fills each case whole, in two pieces cut at elements 1, 7, 20, 21 and `n - 1`,
+and one element at a time. It checks the choice tables, the fallback index of rejected draws and
+missed normals, the word width that follows the range, and the empty fills of every derived draw.
+It checks the SHA-256 of the stream dumps, of 5 x 10^6 normals from the dump recipe, and the
+FNV-1a hash of the exponential dump, which the C library computes because R has no Float32
+exponentials. Start positions stop below 2^63.
+
+The package has no scalar bounded draw, no Float32 normals or exponentials and no complex draws,
+so `below.json`, the Float32 cases and the checklist items on Box-Muller pairs, odd `n` and
+complex draws do not apply.

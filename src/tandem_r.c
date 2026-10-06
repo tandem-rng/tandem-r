@@ -52,6 +52,13 @@ static uint64_t parse_u64(SEXP x, const char *what) {
     return lo;
 }
 
+/* The spec accepts start positions below 2^63, so that a scalar draw or fill cannot reach 2^64. */
+static uint64_t parse_start(SEXP x) {
+    uint64_t p = parse_u64(x, "position");
+    if (p >> 63) error("position must be below 2^63");
+    return p;
+}
+
 static uint32_t parse_K(SEXP x) {
     double d = asReal(x);
     uint32_t K = (uint32_t)d;
@@ -206,7 +213,7 @@ SEXP R_tandem_new(SEXP seed, SEXP K) {
 SEXP R_tandem_from_key(SEXP key, SEXP position, SEXP K) {
     uint32_t k[4];
     parse_key(key, k);
-    return wrap(tandem_from_key(k, parse_u64(position, "position"), parse_K(K)));
+    return wrap(tandem_from_key(k, parse_start(position), parse_K(K)));
 }
 
 SEXP R_tandem_key(SEXP rng) {
@@ -227,7 +234,7 @@ SEXP R_tandem_position(SEXP rng) {
 
 SEXP R_tandem_set_position(SEXP rng, SEXP position) {
     tandem_rng *g = unwrap(rng);
-    g->pos = parse_u64(position, "position");
+    g->pos = parse_start(position);
     sync_position(rng, g);
     return rng;
 }
@@ -506,27 +513,8 @@ SEXP R_tandem_choice_parts(SEXP table) {
     return out;
 }
 
-/* The bytes of the f64 normal fills tandem-c hashes in tests/test_normal_bits.c, hashed here to
- * show that this build, with R's compiler and flags, produces the same bits. R has no f32 normals.
- * Internal, used by tests. */
-SEXP R_tandem_normal_hash(void) {
-    enum { N = 1000000 };
-    const uint64_t starts[] = {0, 1, 77, 12345, (uint64_t)1 << 30};
-    uint64_t h = 0xcbf29ce484222325ull;
-    double *d = (double *)R_alloc(N, sizeof *d);
-    char text[17];
-    for (size_t i = 0; i < sizeof starts / sizeof starts[0]; i++) {
-        tandem_rng g = tandem_seed(2026, 7, 0);
-        const unsigned char *b = (const unsigned char *)d;
-        tandem_set_position(&g, starts[i]);
-        tandem_fill_normal_f64(&g, d, N);
-        for (size_t k = 0; k < N * sizeof *d; k++) h = (h ^ b[k]) * 0x100000001b3ull;
-    }
-    snprintf(text, sizeof text, "%016llx", (unsigned long long)h);
-    return mkString(text);
-}
-
-/* The exponential counterpart, hashing the bytes of tandem-c's tests/test_exponential_bits.c. */
+/* The FNV-1a hash of the bytes of tandem-c's tools/dump_exponentials.c, which interleave f32
+ * fills that R lacks, so that tests can show this build produces the same bits. Internal. */
 SEXP R_tandem_exponential_hash(void) {
     enum { N = 1000000 };
     const uint64_t starts[] = {0, 1, 77, 12345, (uint64_t)1 << 30};
@@ -685,7 +673,6 @@ static const R_CallMethodDef calls[] = {
     {"R_tandem_rbool", (DL_FUNC)&R_tandem_rbool, 2},
     {"R_tandem_below", (DL_FUNC)&R_tandem_below, 4},
     {"R_tandem_rnorm", (DL_FUNC)&R_tandem_rnorm, 2},
-    {"R_tandem_normal_hash", (DL_FUNC)&R_tandem_normal_hash, 0},
     {"R_tandem_rexp", (DL_FUNC)&R_tandem_rexp, 2},
     {"R_tandem_exponential_hash", (DL_FUNC)&R_tandem_exponential_hash, 0},
     {"R_tandem_choice_table", (DL_FUNC)&R_tandem_choice_table, 1},
