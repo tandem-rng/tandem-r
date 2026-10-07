@@ -133,10 +133,10 @@ void tandem_block(const uint32_t key[4], uint64_t c, uint32_t j, uint32_t out[4]
 #define FP_INLINE static inline
 #endif
 
-/* -2 ln x for x in (0, 1], the logarithm of the normals and the exponentials. x = mant 2^k with
- * mant in [sqrt(1/2), sqrt(2)) from the bits: shifting the exponent field by the bits of
- * sqrt(1/2) makes the mantissa rollover pick k. Then -2 ln x = 2 nk ln 2 - 4 s p, with ln 2
- * split so that nk * ln2_hi is exact. No plain product feeds a plain sum, so contraction cannot
+/* -2 ln x for x in (0, 1], the logarithm of the normals and the Float64 exponentials. x =
+ * mant 2^k with mant in [sqrt(1/2), sqrt(2)) from the bits: shifting the exponent field by the
+ * bits of sqrt(1/2) makes the mantissa rollover pick k. Then -2 ln x = 2 nk ln 2 - 4 s p, with
+ * ln 2 split so that nk * ln2_hi is exact. No plain product feeds a plain sum, so contraction cannot
  * change the bits. */
 FP_INLINE double neg2_log_f64(double x) {
     double mant;
@@ -164,6 +164,29 @@ FP_INLINE float neg2_log_f32(float x) {
     float s = (mant - 1.0f) / (mant + 1.0f), zz = s * s;
     float p = FMAF(zz, FMAF(zz, FMAF(zz, 0.14275366f, 0.20000061f), 0.33333334f), 1.0f);
     return FMAF(nk, 2.857213530660374e-06f, FMAF(nk, 1.38629150390625f, (s * -4.0f) * p));
+}
+
+/* -ln x for x in (0, 1], the Float32 exponentials, within 0.58 ulp for every 1 - x on the
+ * 2^-24 grid. An error near 1 ulp moves 1 - exp(-ln x) to a neighbouring grid point, so the
+ * leading term u = (2 - 2m) / (m + 1) = -2 s is carried as uh + r / d: m + 1 = d + dl exactly,
+ * and r is the residual of uh. nk ln2_hi + uh is split exactly by fast two-sum, because
+ * nk ln2_hi is exact and either 0 or larger than |uh|. uh rounds in an fma, so that no
+ * contraction feeds the unrounded num rcp to the two-sum, and products of nk are exact. The tail
+ * u^3 q(u^2) is a minimax fit to 2 atanh(u / 2) - u. */
+FP_INLINE float neg_log_f32(float x) {
+    float mant;
+    uint32_t bits, ix;
+    memcpy(&bits, &x, 4);
+    ix = bits + 0x004afb0du;
+    float nk = (float)(127 - (int32_t)(ix >> 23)); /* -k */
+    ix = (ix & 0x007fffffu) + 0x3f3504f3u;
+    memcpy(&mant, &ix, 4);
+    float num = FMAF(mant, -2.0f, 2.0f), d = mant + 1.0f, dl = mant - (d - 1.0f);
+    float rcp = 1.0f / d, uh = FMAF(num, rcp, 0.0f);
+    float r = FMAF(-uh, dl, FMAF(-uh, d, num)), v = uh * uh;
+    float q = FMAF(v, FMAF(v, 0.0023109776f, 0.012496489f), 0.08333336f);
+    float a = nk * 0.693145751953125f, hi = a + uh, e = uh - (hi - a);
+    return hi + FMAF(uh * v, q, FMAF(r, rcp, FMAF(nk, 1.428606765330187e-06f, e)));
 }
 
 /* sqrt may set errno on a negative argument, which keeps it a library call on glibc and stops
@@ -774,7 +797,7 @@ NOINLINE static void EXPONENTIAL_BLOCK_F32(float *z, size_t m) {
 #if defined(__clang__)
 #pragma clang loop interleave_count(4)
 #endif
-    for (size_t j = 0; j < m; j++) z[j] = 0.5f * neg2_log_f32(1.0f - z[j]);
+    for (size_t j = 0; j < m; j++) z[j] = neg_log_f32(1.0f - z[j]);
 }
 
 /* ---- Float64 normals: the ziggurat ------------------------------------------------------ */

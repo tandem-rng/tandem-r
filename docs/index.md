@@ -16,7 +16,7 @@ can serve as the base R generator.
 remotes::install_github("tandem-rng/tandem-r")
 ```
 
-The vendored C code is tandem-c at commit `ef67bd7`. The build needs a C99 compiler. For development, `pixi install` creates an environment with
+The vendored C code is tandem-c at commit `1c75956`. The build needs a C99 compiler. For development, `pixi install` creates an environment with
 R and the tooling, `pixi run document` regenerates `man/` and `NAMESPACE`, `pixi run test`
 runs the tests and `pixi run check` runs `R CMD check --as-cran`.
 
