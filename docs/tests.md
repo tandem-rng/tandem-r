@@ -26,7 +26,7 @@ matching fill at several positions and chunk lengths. 10^7 normals and exponenti
 first four moments and the Kolmogorov-Smirnov statistic of N(0, 1) and Exp(1), and 10^7 weighted
 choices pass a chi-square test against their weights.
 
-`tests/testthat/conformance` holds copies of the spec's `conformance/*.json` at commit `f420545`,
+`tests/testthat/conformance` holds copies of the spec's `conformance/*.json` at commit `2a4bd08`,
 and CI checks them byte for byte. `tests/testthat/test-conformance.R` compares the bounded fills,
 Float64 normals, Float64 exponentials and weighted choice with every case they reach, values and
 end positions. It fills each case whole, in two pieces cut at elements 1, 7, 20, 21 and `n - 1`,
