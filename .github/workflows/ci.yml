@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # The commit the README names; tools/sync_c.sh copies from it.
-      TANDEM_C: 1adf2ac
+      TANDEM_C: c8d96a0
       # The spec commit whose conformance/*.json tests/testthat/conformance copies.
       SPEC: f420545
     steps:
