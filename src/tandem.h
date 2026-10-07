@@ -16,17 +16,25 @@ extern "C" {
 
 #define TANDEM_DEFAULT_K 32u
 
-/* A generator is its transport form (key, bit position, chunk length K) plus a cache of
- * the eight chunk states that make up the current 1024-bit row. Copy it freely: the cache
- * is a pure function of the transport form, stored word-major (o[word][lane]). Treat every
- * field as private. */
+/* A generator is its transport form (key, bit position, chunk length K) plus a cache of the
+ * eight chunk states of a 1024-bit row. Copy it freely: the cache is a pure function of the
+ * transport form. Treat every field as private.
+ *
+ * The cache holds the state of row `ahead`, its exposed words in o[ahead & 1] in stream order
+ * and its hidden words in h, word-major (h[word][lane]), when `cached` is set. base is the bit
+ * position of the row the inline draws read, o[(base >> 10) & 1]: row ahead, or row ahead - 1
+ * while the next row waits in the other slot. With nothing to read, base names a row before
+ * pos, which draws never reach, since they only move forward. */
 typedef struct {
     uint32_t key[4];
     uint64_t pos;
     uint32_t K;
     uint32_t cached;
-    uint64_t row;
-    uint32_t o[4][8];
+    uint64_t ahead;
+    /* Not next to pos: a draw stores pos, and a load of pos paired with base into one wider
+     * load cannot take the stored value from the store buffer. */
+    uint64_t base;
+    uint32_t o[2][32];
     uint32_t h[4][8];
 } tandem_rng;
 
@@ -51,11 +59,51 @@ typedef struct {
 bool tandem_next_bool(tandem_rng *rng);
 uint8_t tandem_next_u8(tandem_rng *rng);
 uint16_t tandem_next_u16(tandem_rng *rng);
+tandem_u128 tandem_next_u128(tandem_rng *rng);
+
+/* The 32- and 64-bit draws are inline, so that a loop keeps pos in a register: only the
+ * refill is a call, and pos is stored after it. tandem_refill makes a row readable and steps
+ * the cache one row ahead, so the next refill finds its row computed and no read waits on a
+ * recent store. The library also exports each draw as a function. GNU89 inline semantics would
+ * emit a definition in every file, so those builds call the exported functions. */
+void tandem_refill(tandem_rng *rng, uint64_t row);
+#if defined(__GNUC_GNU_INLINE__) && !defined(__cplusplus)
 uint32_t tandem_next_u32(tandem_rng *rng);
 uint64_t tandem_next_u64(tandem_rng *rng);
-tandem_u128 tandem_next_u128(tandem_rng *rng);
 float tandem_next_f32(tandem_rng *rng);
 double tandem_next_f64(tandem_rng *rng);
+#else
+/* pos - base is a multiple of the width below 1024 exactly when pos is aligned and readable. */
+inline uint32_t tandem_next_u32(tandem_rng *rng) {
+    uint64_t p = rng->pos;
+    if ((p - rng->base) & ~(uint64_t)0x3e0u) {
+        p = (p + 31u) & ~(uint64_t)31u;
+        tandem_refill(rng, p >> 10);
+    }
+    rng->pos = p + 32u;
+    return rng->o[(p >> 10) & 1u][(p >> 5) & 31u];
+}
+
+inline uint64_t tandem_next_u64(tandem_rng *rng) {
+    uint64_t p = rng->pos;
+    if ((p - rng->base) & ~(uint64_t)0x3c0u) {
+        p = (p + 63u) & ~(uint64_t)63u;
+        tandem_refill(rng, p >> 10);
+    }
+    rng->pos = p + 64u;
+    const uint32_t *w = &rng->o[(p >> 10) & 1u][(p >> 5) & 31u];
+    return w[0] | (uint64_t)w[1] << 32;
+}
+
+inline float tandem_next_f32(tandem_rng *rng) {
+    return (float)(tandem_next_u32(rng) >> 8) * 5.9604644775390625e-8f; /* 2^-24 */
+}
+
+inline double tandem_next_f64(tandem_rng *rng) {
+    /* 2^-53 */
+    return (double)(tandem_next_u64(rng) >> 11) * 1.1102230246251565404236316680908203125e-16;
+}
+#endif
 /* IEEE binary16 bit pattern of a uniform draw in [0, 1), the spec's Float16 mapping. */
 uint16_t tandem_next_f16_bits(tandem_rng *rng);
 /* A uniform Unicode scalar value, 64 stream bits per draw. */
