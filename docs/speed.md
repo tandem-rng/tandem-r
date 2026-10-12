@@ -1,4 +1,4 @@
-# Speed
+# Performance
 
 `pixi run bench` produces the figures.
 

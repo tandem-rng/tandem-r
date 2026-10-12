@@ -7,7 +7,7 @@ can serve as the base R generator.
 - [API](api.md): the functions, the base R hook, serialization and parallel use.
 - [Design](design.md): the bounded integer, normal and exponential contracts.
 - [Tests](tests.md): what the suite checks.
-- [Speed](speed.md): fill and base R figures on the Apple M4.
+- [Performance](speed.md): fill and base R figures on the Apple M4.
 
 ## Install
 
