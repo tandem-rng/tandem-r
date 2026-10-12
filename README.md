@@ -10,12 +10,14 @@ R package `tandemrng` for [Tandem8x32](https://github.com/tandem-rng/spec), a no
 pseudorandom number generator. It wraps a vendored tandem-c and produces the specified stream
 bit for bit, and it can serve as the base R generator.
 
-Needs a C99 compiler. The vendored C code is tandem-c at commit `1c75956`.
+## Install
 
 ```r
 # install.packages("remotes")
 remotes::install_github("tandem-rng/tandem-r")
 ```
+
+## Quick start
 
 ```r
 library(tandemrng)
@@ -28,8 +30,14 @@ k <- tandem_sample_int(rng, 10, 3, prob = c(1, 2, 7))  # weighted, like sample.i
 RNGkind("user-supplied")             # Tandem as the base R generator
 ```
 
+## Requirements
+
+Needs a C99 compiler. The vendored C code is tandem-c at commit `1c75956`.
+
+## Documentation
+
 See [API](docs/api.md), [design](docs/design.md), [tests](docs/tests.md) and [speed](docs/speed.md).
 
 Portions of the code were generated with the assistance of LLMs.
 
-[Documentation](https://tandem-rng.github.io/tandem-r/) · [Apache 2.0 license](LICENSE)
+[Docs](https://tandem-rng.github.io/tandem-r/) · [Specification](https://github.com/tandem-rng/spec/blob/main/SPEC.md) · [Website](https://tandem-rng.github.io/) · [Issues](https://github.com/tandem-rng/tandem-r/issues) · [License](LICENSE)
