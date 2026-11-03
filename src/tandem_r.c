@@ -257,8 +257,9 @@ SEXP R_tandem_rsingle(SEXP rng, SEXP n) {
     size_t len = parse_n(n);
     SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)len));
     double *x = REAL(out);
-    /* Fill the second half of the buffer with floats, then widen in place from the front. */
-    float *f = (float *)(x + len / 2 + len % 2);
+    /* The final len floats fit exactly in len doubles, including odd lengths. Widening
+     * forward overwrites only floats already read. */
+    float *f = (float *)x + len;
     tandem_rng *g = unwrap(rng);
     tandem_fill_f32(g, f, len);
     sync_position(rng, g);

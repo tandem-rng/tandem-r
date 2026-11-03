@@ -74,6 +74,13 @@ test_that("fills agree with the Julia dumps", {
   expect_identical(tandem_rbool(tandem(42), 4096), dump("seed42_K32_bool.bin", "integer", 1) == 1)
 })
 
+test_that("odd Float32 fills preserve values and position", {
+  rng <- tandem_from_key(key, 33, K)
+  want <- tandem_at(rng, "f32", 0:2)
+  expect_identical(tandem_rsingle(rng, 3), want)
+  expect_identical(tandem_position(rng), 160)
+})
+
 test_that("positions align to the width and fills can start anywhere", {
   rng <- tandem(42)
   tandem_rbits(rng, 1, 8)
