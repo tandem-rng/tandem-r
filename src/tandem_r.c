@@ -216,6 +216,14 @@ SEXP R_tandem_from_key(SEXP key, SEXP position, SEXP K) {
     return wrap(tandem_from_key(k, parse_start(position), parse_K(K)));
 }
 
+/* Restoring a successor position must preserve all 64 bits, including positions above the
+ * constructor's initial bound after a legal draw. */
+SEXP R_tandem_restore(SEXP key, SEXP position, SEXP K) {
+    uint32_t k[4];
+    parse_key(key, k);
+    return wrap(tandem_from_key(k, parse_u64(position, "position"), parse_K(K)));
+}
+
 SEXP R_tandem_key(SEXP rng) {
     uint32_t key[4];
     char s[33];
@@ -257,8 +265,9 @@ SEXP R_tandem_rsingle(SEXP rng, SEXP n) {
     size_t len = parse_n(n);
     SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)len));
     double *x = REAL(out);
-    /* Fill the second half of the buffer with floats, then widen in place from the front. */
-    float *f = (float *)(x + len / 2 + len % 2);
+    /* The final len floats fit exactly in len doubles, including odd lengths. Widening
+     * forward overwrites only floats already read. */
+    float *f = (float *)x + len;
     tandem_rng *g = unwrap(rng);
     tandem_fill_f32(g, f, len);
     sync_position(rng, g);
@@ -396,8 +405,9 @@ SEXP R_tandem_below(SEXP rng, SEXP n, SEXP max, SEXP one) {
         out = PROTECT(allocVector(REALSXP, (R_xlen_t)len));
         /* Width 32 holds for range 2^32 too, where Lemire never rejects and the word is the
          * value. The C fill takes a uint32_t bound and cannot express 2^32. */
-        if (range == (uint64_t)1 << 32) tandem_fill_u32(g, u, len);
-        else tandem_fill_u32_below(g, u, len, (uint32_t)range);
+        if (range == (uint64_t)1 << 32) {
+            if (len) tandem_fill_u32(g, u, len);
+        } else tandem_fill_u32_below(g, u, len, (uint32_t)range);
         for (size_t i = 0; i < len; i++) REAL(out)[i] = (double)u[i] + base;
     } else {
         uint64_t *u = (uint64_t *)R_alloc(len ? len : 1, sizeof *u);
@@ -548,13 +558,12 @@ SEXP R_tandem_sub(SEXP rng, SEXP purpose) {
 
 SEXP R_tandem_fork(SEXP rng, SEXP n) {
     size_t len = parse_n(n);
-    tandem_rng *kids = R_Calloc(len ? len : 1, tandem_rng);
-    SEXP out = PROTECT(allocVector(VECSXP, (R_xlen_t)len));
     tandem_rng *g = unwrap(rng);
+    tandem_rng *kids = (tandem_rng *)R_alloc(len ? len : 1, sizeof *kids);
+    SEXP out = PROTECT(allocVector(VECSXP, (R_xlen_t)len));
     tandem_fork(g, kids, len);
     sync_position(rng, g);
     for (size_t i = 0; i < len; i++) SET_VECTOR_ELT(out, (R_xlen_t)i, wrap(kids[i]));
-    R_Free(kids);
     UNPROTECT(1);
     return out;
 }
@@ -661,6 +670,7 @@ double *user_unif_rand(void) {
 static const R_CallMethodDef calls[] = {
     {"R_tandem_new", (DL_FUNC)&R_tandem_new, 2},
     {"R_tandem_from_key", (DL_FUNC)&R_tandem_from_key, 3},
+    {"R_tandem_restore", (DL_FUNC)&R_tandem_restore, 3},
     {"R_tandem_key", (DL_FUNC)&R_tandem_key, 1},
     {"R_tandem_position", (DL_FUNC)&R_tandem_position, 1},
     {"R_tandem_set_position", (DL_FUNC)&R_tandem_set_position, 2},

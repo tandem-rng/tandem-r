@@ -2,7 +2,11 @@
 
 ```sh
 pixi run test     # tests/testthat/test-*.R
+pixi run Rscript tools/check_rsingle_bounds.R
 ```
+
+The native bounds check builds the actual Float32 wrapper with a guard immediately after its
+requested output extent and checks empty, odd and even fills. CI runs it on Linux and macOS.
 
 ## Suite
 

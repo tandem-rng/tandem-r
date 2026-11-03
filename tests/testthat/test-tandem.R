@@ -74,6 +74,13 @@ test_that("fills agree with the Julia dumps", {
   expect_identical(tandem_rbool(tandem(42), 4096), dump("seed42_K32_bool.bin", "integer", 1) == 1)
 })
 
+test_that("odd Float32 fills preserve values and position", {
+  rng <- tandem_from_key(key, 33, K)
+  want <- tandem_at(rng, "f32", 0:2)
+  expect_identical(tandem_rsingle(rng, 3), want)
+  expect_identical(tandem_position(rng), 160)
+})
+
 test_that("positions align to the width and fills can start anywhere", {
   rng <- tandem(42)
   tandem_rbits(rng, 1, 8)
@@ -102,6 +109,13 @@ test_that("state round-trips through a plain list", {
   big <- tandem_from_key(key, "9223372036854775000", K)
   expect_identical(tandem_state(big)$position, "9223372036854775000")
   expect_identical(tandem_position(tandem_restore(tandem_state(big))), "9223372036854775000")
+  crossed <- tandem_from_key(key, "9223372036854775807", K)
+  tandem_runif(crossed, 1)
+  back <- tandem_restore(tandem_state(crossed))
+  expect_identical(tandem_position(back), "9223372036854775872")
+  expect_identical(tandem_rsingle(back, 3), tandem_rsingle(crossed, 3))
+  expect_identical(tandem_runif(back, 2), tandem_runif(crossed, 2))
+  expect_identical(tandem_position(back), tandem_position(crossed))
 })
 
 test_that("a generator survives serialization at its current position", {

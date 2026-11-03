@@ -28,7 +28,8 @@ serialized. Every copy made this way is independent of the others.
 \details{
 \code{tandem_state()} returns the transport form as a plain list, for formats other than R's
 own: \code{key} as 32 hex digits, \code{position} as a string of decimal digits, and \code{K}.
-\code{tandem_restore()} builds a generator from such a list.
+\code{tandem_restore()} builds a generator from such a list, preserving the full unsigned
+64-bit position even when draws have advanced it past the initial start bound.
 }
 \examples{
 rng <- tandem(42)

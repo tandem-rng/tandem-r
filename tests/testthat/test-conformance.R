@@ -126,6 +126,9 @@ test_that("the empty fills of every derived draw keep or align the position as t
     expect_length(f(rng, case), 0)
     expect_identical(tandem_position(rng), as.numeric(case$end), label = case$id)
   }
+  rng <- tandem_from_key(c(1, 2, 3, 4), 33)
+  expect_identical(tandem_below(rng, 0, 2^32), numeric())
+  expect_identical(tandem_position(rng), 33)
 })
 
 test_that("the stream dumps and long outputs have the conformance hashes", {
