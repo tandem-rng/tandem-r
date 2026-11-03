@@ -63,7 +63,8 @@ tandem_chunk_length <- function(rng) .Call(R_tandem_chunk_length, rng)
 #'
 #' `tandem_state()` returns the transport form as a plain list, for formats other than R's
 #' own: `key` as 32 hex digits, `position` as a string of decimal digits, and `K`.
-#' `tandem_restore()` builds a generator from such a list.
+#' `tandem_restore()` builds a generator from such a list, preserving the full unsigned
+#' 64-bit position even when draws have advanced it past the initial start bound.
 #'
 #' @param rng A `tandem_rng` object.
 #' @param state A list with `key`, `position` and `K`, as `tandem_state()` returns.
@@ -86,7 +87,7 @@ tandem_state <- function(rng) {
 
 #' @rdname state
 #' @export
-tandem_restore <- function(state) tandem_from_key(state$key, state$position, state$K)
+tandem_restore <- function(state) .Call(R_tandem_restore, state$key, state$position, as.double(state$K))
 
 #' @export
 print.tandem_rng <-function(x, ...) {

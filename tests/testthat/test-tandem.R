@@ -109,6 +109,13 @@ test_that("state round-trips through a plain list", {
   big <- tandem_from_key(key, "9223372036854775000", K)
   expect_identical(tandem_state(big)$position, "9223372036854775000")
   expect_identical(tandem_position(tandem_restore(tandem_state(big))), "9223372036854775000")
+  crossed <- tandem_from_key(key, "9223372036854775807", K)
+  tandem_runif(crossed, 1)
+  back <- tandem_restore(tandem_state(crossed))
+  expect_identical(tandem_position(back), "9223372036854775872")
+  expect_identical(tandem_rsingle(back, 3), tandem_rsingle(crossed, 3))
+  expect_identical(tandem_runif(back, 2), tandem_runif(crossed, 2))
+  expect_identical(tandem_position(back), tandem_position(crossed))
 })
 
 test_that("a generator survives serialization at its current position", {

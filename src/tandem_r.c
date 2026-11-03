@@ -216,6 +216,14 @@ SEXP R_tandem_from_key(SEXP key, SEXP position, SEXP K) {
     return wrap(tandem_from_key(k, parse_start(position), parse_K(K)));
 }
 
+/* Restoring a successor position must preserve all 64 bits, including positions above the
+ * constructor's initial bound after a legal draw. */
+SEXP R_tandem_restore(SEXP key, SEXP position, SEXP K) {
+    uint32_t k[4];
+    parse_key(key, k);
+    return wrap(tandem_from_key(k, parse_u64(position, "position"), parse_K(K)));
+}
+
 SEXP R_tandem_key(SEXP rng) {
     uint32_t key[4];
     char s[33];
@@ -662,6 +670,7 @@ double *user_unif_rand(void) {
 static const R_CallMethodDef calls[] = {
     {"R_tandem_new", (DL_FUNC)&R_tandem_new, 2},
     {"R_tandem_from_key", (DL_FUNC)&R_tandem_from_key, 3},
+    {"R_tandem_restore", (DL_FUNC)&R_tandem_restore, 3},
     {"R_tandem_key", (DL_FUNC)&R_tandem_key, 1},
     {"R_tandem_position", (DL_FUNC)&R_tandem_position, 1},
     {"R_tandem_set_position", (DL_FUNC)&R_tandem_set_position, 2},
