@@ -405,8 +405,9 @@ SEXP R_tandem_below(SEXP rng, SEXP n, SEXP max, SEXP one) {
         out = PROTECT(allocVector(REALSXP, (R_xlen_t)len));
         /* Width 32 holds for range 2^32 too, where Lemire never rejects and the word is the
          * value. The C fill takes a uint32_t bound and cannot express 2^32. */
-        if (range == (uint64_t)1 << 32) tandem_fill_u32(g, u, len);
-        else tandem_fill_u32_below(g, u, len, (uint32_t)range);
+        if (range == (uint64_t)1 << 32) {
+            if (len) tandem_fill_u32(g, u, len);
+        } else tandem_fill_u32_below(g, u, len, (uint32_t)range);
         for (size_t i = 0; i < len; i++) REAL(out)[i] = (double)u[i] + base;
     } else {
         uint64_t *u = (uint64_t *)R_alloc(len ? len : 1, sizeof *u);
