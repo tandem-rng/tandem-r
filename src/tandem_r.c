@@ -558,13 +558,12 @@ SEXP R_tandem_sub(SEXP rng, SEXP purpose) {
 
 SEXP R_tandem_fork(SEXP rng, SEXP n) {
     size_t len = parse_n(n);
-    tandem_rng *kids = R_Calloc(len ? len : 1, tandem_rng);
-    SEXP out = PROTECT(allocVector(VECSXP, (R_xlen_t)len));
     tandem_rng *g = unwrap(rng);
+    tandem_rng *kids = (tandem_rng *)R_alloc(len ? len : 1, sizeof *kids);
+    SEXP out = PROTECT(allocVector(VECSXP, (R_xlen_t)len));
     tandem_fork(g, kids, len);
     sync_position(rng, g);
     for (size_t i = 0; i < len; i++) SET_VECTOR_ELT(out, (R_xlen_t)i, wrap(kids[i]));
-    R_Free(kids);
     UNPROTECT(1);
     return out;
 }
